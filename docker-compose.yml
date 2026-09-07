@@ -1,0 +1,19 @@
+services:
+  beethovenly:
+    build: .
+    container_name: beethovenly
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      COOKIES_FILE: ${COOKIES_FILE:-}
+    volumes:
+      - ./data:/app/data
+    # Discord Voice idzie UDP na zewnątrz. Jeśli dźwięk nie dochodzi,
+    # odkomentuj poniższą linię (Linux):
+    # network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
