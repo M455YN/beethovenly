@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/beethovenly-logo.svg" alt="Beethovenly" width="160" height="160" />
+</p>
+
 # Beethovenly
 
 A Discord music bot that joins voice, pulls audio with **yt-dlp**, decodes it with **mpv**, and streams it to the voice channel. A button panel stays on the text channel for pause, skip, volume, loop, and queue.
