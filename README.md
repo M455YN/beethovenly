@@ -44,7 +44,8 @@ Join a voice channel and run `/play never gonna give you up`. The control panel 
 
 - `/play` — URL or search (YouTube, SoundCloud, Bandcamp, plain audio URLs)
 - Spotify links → finds a YouTube match (no Spotify API)
-- playlists (capped by `PLAYLIST_LIMIT`)
+- playlists (capped by `PLAYLIST_LIMIT`) — YouTube/external URLs via `/play`, plus saved server playlists via `/playlist`
+- `/playlist create|save|add|load|list|show|delete` — create and reuse named playlists (stored under `data/playlists/`)
 - `/search` — clickable result list
 - channel panel: ⏮️ pause ⏭️ stop 🔁 🔀 🔉 🔊 queue, plus a “jump to track” list
 - loop modes: off / queue / one track
@@ -100,7 +101,7 @@ network_mode: host
 
 ## Commands
 
-`/play` `/search` `/join` `/leave` `/skip` `/pause` `/stop` `/queue` `/nowplaying` `/volume` `/shuffle` `/loop` `/remove` `/clear` `/help`
+`/play` `/search` `/join` `/leave` `/skip` `/pause` `/stop` `/queue` `/nowplaying` `/volume` `/shuffle` `/loop` `/remove` `/clear` `/playlist` `/help`
 
 Most controls are on the panel — slash commands are a fallback.
 

@@ -8,5 +8,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 data/cookies.txt
+data/playlists/
 *.log
 .DS_Store

@@ -57,6 +57,40 @@ class Track:
             title = title[: rest - 1] + "…"
         return prefix + title
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "webpage_url": self.webpage_url,
+            "webpage_id": self.webpage_id,
+            "uploader": self.uploader,
+            "duration": self.duration,
+            "thumbnail": self.thumbnail,
+            "extractor": self.extractor,
+            "is_live": self.is_live,
+            "source_query": self.source_query,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], *, requester: discord.abc.User) -> Track:
+        duration = data.get("duration")
+        try:
+            duration_val = float(duration) if duration is not None else None
+        except (TypeError, ValueError):
+            duration_val = None
+        return cls(
+            title=str(data.get("title") or "Nieznany utwór"),
+            webpage_url=str(data.get("webpage_url") or ""),
+            webpage_id=str(data.get("webpage_id") or ""),
+            uploader=str(data.get("uploader") or "Nieznany autor"),
+            duration=duration_val,
+            thumbnail=str(data["thumbnail"]) if data.get("thumbnail") else None,
+            extractor=str(data.get("extractor") or "generic"),
+            is_live=bool(data.get("is_live")),
+            requester_id=requester.id,
+            requester_name=requester.display_name,
+            source_query=str(data.get("source_query") or data.get("webpage_url") or ""),
+        )
+
 
 def track_from_info(info: dict[str, Any], *, requester: discord.abc.User, query: str) -> Track:
     duration = info.get("duration")
