@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write .env from GitHub Secrets
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          COMMAND_GUILD_ID: ${{ secrets.COMMAND_GUILD_ID }}
+          BOT_STATUS: ${{ secrets.BOT_STATUS }}
+          IDLE_DISCONNECT_SECONDS: ${{ secrets.IDLE_DISCONNECT_SECONDS }}
+          PLAYLIST_LIMIT: ${{ secrets.PLAYLIST_LIMIT }}
+          COOKIES_FILE: ${{ secrets.COOKIES_FILE }}
+          SKIP_YTDLP_UPDATE: ${{ secrets.SKIP_YTDLP_UPDATE }}
+        run: |
+          if [ -z "$DISCORD_TOKEN" ]; then
+            echo "Missing required repository secret: DISCORD_TOKEN"
+            echo "Add it under Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+          {
+            echo "DISCORD_TOKEN=${DISCORD_TOKEN}"
+            if [ -n "$COMMAND_GUILD_ID" ]; then
+              echo "COMMAND_GUILD_ID=${COMMAND_GUILD_ID}"
+            fi
+            echo "BOT_STATUS=${BOT_STATUS:-/play • beethovenly}"
+            echo "IDLE_DISCONNECT_SECONDS=${IDLE_DISCONNECT_SECONDS:-300}"
+            echo "PLAYLIST_LIMIT=${PLAYLIST_LIMIT:-50}"
+            if [ -n "$COOKIES_FILE" ]; then
+              echo "COOKIES_FILE=${COOKIES_FILE}"
+            fi
+            if [ -n "$SKIP_YTDLP_UPDATE" ]; then
+              echo "SKIP_YTDLP_UPDATE=${SKIP_YTDLP_UPDATE}"
+            fi
+          } > .env
+
+          chmod 600 .env
+
+      - name: Deploy with Docker Compose
+        run: docker compose up -d --build

@@ -16,18 +16,23 @@ A Discord music bot that joins voice, pulls audio with **yt-dlp**, decodes it wi
 https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=3230720&scope=bot%20applications.commands
 ```
 
-5. In the project directory:
+5. Store secrets in GitHub (recommended):
+   - Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+   - Required: `DISCORD_TOKEN`
+   - Optional: `COMMAND_GUILD_ID` (immediate slash-command sync on one guild)
+6. Deploy with the included workflow (self-hosted runner with Docker), or run locally:
 
 ```bash
+# Local fallback (do not commit .env)
 cp .env.example .env
 # set DISCORD_TOKEN=...
-
-# optional: sync slash commands to one guild immediately
-# COMMAND_GUILD_ID=your_server_id
+# optional: COMMAND_GUILD_ID=your_server_id
 
 docker compose up -d --build
 docker compose logs -f
 ```
+
+On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actions writes `.env` from those secrets and runs `docker compose up -d --build` on your self-hosted runner.
 
 Join a voice channel and run `/play never gonna give you up`. The control panel appears on the text channel.
 
@@ -55,7 +60,9 @@ python -m bot
 
 ## Configuration
 
-| Variable | Purpose |
+Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for manual runs.
+
+| Variable / secret | Purpose |
 |---|---|
 | `DISCORD_TOKEN` | bot token (**required**) |
 | `COMMAND_GUILD_ID` | sync slash commands to one guild (immediate) |
@@ -64,6 +71,12 @@ python -m bot
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
 | `COOKIES_FILE` | `/app/data/cookies.txt` when YouTube blocks or age-gates |
 | `SKIP_YTDLP_UPDATE` | `1` = do not update yt-dlp on container start |
+
+### GitHub Secrets
+
+1. Open [repository secrets](https://github.com/M455YN/beethovenly/settings/secrets/actions).
+2. Add `DISCORD_TOKEN` (required) and optionally `COMMAND_GUILD_ID`.
+3. Register a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners) on the machine that should run Docker, then push to `main` or run **Deploy** manually.
 
 Cookies: export a `cookies.txt` (browser extension) and place it at `data/cookies.txt`. In `.env`:
 
