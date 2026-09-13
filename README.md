@@ -99,6 +99,12 @@ network_mode: host
 
 (Linux). Also confirm the bot has Speak / Connect and is not server-muted.
 
+If the bot shows an offline panel and logs `WebSocket closed with 4006`, update voice deps:
+
+```bash
+.venv/bin/python -m pip install -U 'discord.py[voice]==2.7.1'
+```
+
 ## Commands
 
 `/play` `/search` `/join` `/leave` `/skip` `/pause` `/stop` `/queue` `/nowplaying` `/volume` `/shuffle` `/loop` `/remove` `/clear` `/playlist` `/help`

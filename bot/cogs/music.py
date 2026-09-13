@@ -64,7 +64,7 @@ class Music(commands.Cog):
     @app_commands.describe(query="Title or YouTube, SoundCloud, Bandcamp, or Spotify link")
     async def play(self, interaction: discord.Interaction, query: str) -> None:
         channel = await self._require_voice(interaction)
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         try:
             tracks = await extract_tracks(query, requester=interaction.user, search_count=1)
         except ExtractionError as exc:
@@ -72,7 +72,16 @@ class Music(commands.Cog):
             return
 
         player = self.bot.get_player(interaction.guild)
-        await player.connect(channel)
+        try:
+            await player.connect(channel)
+        except Exception:
+            log.exception("Voice connect failed in /play")
+            await interaction.followup.send(
+                "Could not join voice (Discord closed the connection). "
+                "Make sure the bot has **Connect** + **Speak**, then try `/play` again.",
+                ephemeral=True,
+            )
+            return
         panel_channel = interaction.channel
         added = await player.enqueue(tracks, text_channel=panel_channel)
         if panel_channel is not None:
@@ -82,9 +91,10 @@ class Music(commands.Cog):
             track = tracks[0]
             await interaction.followup.send(
                 f"**{truncate(track.display_title, 80)}** · `{format_duration(track.duration)}` · {track.uploader}",
+                ephemeral=True,
             )
         else:
-            await interaction.followup.send(f"Dodałem **{added}** utworów z playlisty.")
+            await interaction.followup.send(f"Dodałem **{added}** utworów z playlisty.", ephemeral=True)
 
     @app_commands.command(name="search", description="Show search results and pick from a list")
     @app_commands.describe(query="What to search for")
@@ -115,38 +125,43 @@ class Music(commands.Cog):
         player = self.bot.get_player(interaction.guild)
         await player.connect(channel)
         await player.ensure_controller(interaction.channel)
-        await interaction.response.send_message(f"Wchodzę na {channel.mention}.")
+        await interaction.response.send_message(f"Joined {channel.mention}.", ephemeral=True)
 
     @app_commands.command(name="leave", description="Leave the voice channel")
     async def leave(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         if player.voice is None:
-            await interaction.response.send_message("I tak nigdzie nie siedziałem.", ephemeral=True)
+            await interaction.response.send_message("I'm not in a voice channel.", ephemeral=True)
             return
         await player.disconnect()
-        await interaction.response.send_message("Wychodzę. Do usłyszenia.")
+        await interaction.response.send_message("Left voice.", ephemeral=True)
 
     @app_commands.command(name="skip", description="Skip the current track")
     async def skip(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         track = await player.skip()
         if track is None:
-            await interaction.response.send_message("Nic nie leci.", ephemeral=True)
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
             return
-        await interaction.response.send_message(f"Pomijam **{truncate(track.display_title, 80)}**.")
+        await player.refresh_controller()
+        await interaction.response.send_message(
+            f"Skipped **{truncate(track.display_title, 80)}**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="pause", description="Pause / resume playback")
     async def pause(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         state = await player.toggle_pause()
-        labels = {"pause": "Pauza.", "resume": "Lecimy dalej.", "noop": "Nie mam czego pauzować."}
-        await interaction.response.send_message(labels[state], ephemeral=state == "noop")
+        labels = {"pause": "Paused.", "resume": "Resumed.", "noop": "Nothing to pause."}
+        await player.refresh_controller()
+        await interaction.response.send_message(labels[state], ephemeral=True)
 
     @app_commands.command(name="stop", description="Stop playback and clear the queue")
     async def stop(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         await player.stop()
-        await interaction.response.send_message("Stop. Kolejka wyczyszczona.")
+        await interaction.response.send_message("Stopped. Queue cleared.", ephemeral=True)
 
     @app_commands.command(name="queue", description="Show the queue")
     async def queue(self, interaction: discord.Interaction) -> None:
@@ -157,26 +172,29 @@ class Music(commands.Cog):
     async def nowplaying(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         await player.ensure_controller(interaction.channel)
-        await interaction.response.send_message("Panel jest na kanale.", ephemeral=True)
+        await interaction.response.send_message("Panel refreshed.", ephemeral=True)
 
     @app_commands.command(name="volume", description="Set volume (0–150)")
     @app_commands.describe(percent="Volume percent")
     async def volume(self, interaction: discord.Interaction, percent: app_commands.Range[int, 0, 150]) -> None:
         player = self.bot.get_player(interaction.guild)
         vol = await player.set_volume(percent / 100)
-        await interaction.response.send_message(f"Głośność: **{int(vol * 100)}%**")
+        await interaction.response.send_message(f"Volume: **{int(vol * 100)}%**", ephemeral=True)
 
     @app_commands.command(name="shuffle", description="Shuffle the queue")
     async def shuffle(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         on = await player.toggle_shuffle()
-        await interaction.response.send_message("Losowo: **włączone**." if on else "Losowo: **wyłączone**.")
+        await interaction.response.send_message(
+            "Shuffle **on**." if on else "Shuffle **off**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="loop", description="Cycle loop: off → queue → track")
     async def loop(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         mode = await player.cycle_loop()
-        await interaction.response.send_message(f"Pętla: **{mode.label()}**")
+        await interaction.response.send_message(f"Loop: **{mode.label()}**", ephemeral=True)
 
     @app_commands.command(name="remove", description="Remove a track from the queue by number")
     @app_commands.describe(numer="Number from /queue (starting at 1)")
@@ -184,15 +202,18 @@ class Music(commands.Cog):
         player = self.bot.get_player(interaction.guild)
         track = await player.remove_at(numer - 1)
         if track is None:
-            await interaction.response.send_message("Nie ma takiego numeru w kolejce.", ephemeral=True)
+            await interaction.response.send_message("No track with that number.", ephemeral=True)
             return
-        await interaction.response.send_message(f"Wyrzuciłem **{truncate(track.display_title, 80)}**.")
+        await interaction.response.send_message(
+            f"Removed **{truncate(track.display_title, 80)}**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="clear", description="Clear the queue (current track keeps playing)")
     async def clear(self, interaction: discord.Interaction) -> None:
         player = self.bot.get_player(interaction.guild)
         n = await player.clear_queue()
-        await interaction.response.send_message(f"Wyrzuciłem {n} utworów z kolejki.")
+        await interaction.response.send_message(f"Cleared {n} queued tracks.", ephemeral=True)
 
     def _queue_tracks_for_save(self, player) -> list[Track]:
         tracks: list[Track] = []
@@ -303,7 +324,7 @@ class Music(commands.Cog):
             )
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         tracks = [
             Track.from_dict(item, requester=interaction.user)
             for item in saved.tracks[: settings.playlist_limit]
@@ -319,7 +340,10 @@ class Music(commands.Cog):
         added = await player.enqueue(tracks, text_channel=panel_channel)
         if panel_channel is not None:
             await player.ensure_controller(panel_channel)
-        await interaction.followup.send(f"Wczytałem **{saved.name}** — dodałem **{added}** utw.")
+        await interaction.followup.send(
+            f"Wczytałem **{saved.name}** — dodałem **{added}** utw.",
+            ephemeral=True,
+        )
 
     @playlist.command(name="list", description="List saved playlists on this server")
     async def playlist_list(self, interaction: discord.Interaction) -> None:

@@ -21,9 +21,10 @@ def _same_voice(interaction: discord.Interaction, player: GuildPlayer) -> str | 
 
 
 class PlayerView(discord.ui.View):
-    def __init__(self, player: GuildPlayer, *, disabled: bool = False) -> None:
+    def __init__(self, player: GuildPlayer, *, disabled: bool = False, show_queue: bool = False) -> None:
         super().__init__(timeout=None)
         self.player = player
+        self.show_queue = show_queue
         paused = player.is_paused
         playing = player.is_playing
         empty = player.current is None and not player.queue
@@ -45,6 +46,9 @@ class PlayerView(discord.ui.View):
         self.shuffle.disabled = disabled
         self.vol_down.disabled = disabled or player.volume <= 0.0
         self.vol_up.disabled = disabled or player.volume >= 1.5
+        self.queue_btn.style = (
+            discord.ButtonStyle.primary if show_queue else discord.ButtonStyle.secondary
+        )
         self.queue_btn.disabled = disabled
         self.leave.disabled = disabled
 
@@ -77,18 +81,16 @@ class PlayerView(discord.ui.View):
             return False
         return True
 
-    async def _ack(self, interaction: discord.Interaction) -> None:
-        embed = build_player_embed(self.player)
-        view = PlayerView(self.player)
+    async def _ack(self, interaction: discord.Interaction, *, show_queue: bool = False) -> None:
+        embed = build_queue_embed(self.player) if show_queue else build_player_embed(self.player)
+        view = PlayerView(self.player, show_queue=show_queue)
         await interaction.response.edit_message(embed=embed, view=view)
         self.player.controller_message = interaction.message
 
     @discord.ui.button(label="Poprzedni", emoji="⏮️", style=discord.ButtonStyle.secondary, row=0)
     async def prev(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        track = await self.player.previous()
+        await self.player.previous()
         await self._ack(interaction)
-        if track is None:
-            await interaction.followup.send("Nie mam nic wcześniejszego.", ephemeral=True)
 
     @discord.ui.button(label="Pauza", emoji="⏸️", style=discord.ButtonStyle.primary, row=0)
     async def playpause(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -107,15 +109,13 @@ class PlayerView(discord.ui.View):
 
     @discord.ui.button(label="Pętla", emoji="🔁", style=discord.ButtonStyle.secondary, row=0)
     async def loop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        mode = await self.player.cycle_loop()
+        await self.player.cycle_loop()
         await self._ack(interaction)
-        await interaction.followup.send(f"Pętla: **{mode.label()}**", ephemeral=True)
 
     @discord.ui.button(label="Losowo", emoji="🔀", style=discord.ButtonStyle.secondary, row=1)
     async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        on = await self.player.toggle_shuffle()
+        await self.player.toggle_shuffle()
         await self._ack(interaction)
-        await interaction.followup.send("Losowa kolejka włączona." if on else "Losowa kolejka wyłączona.", ephemeral=True)
 
     @discord.ui.button(label="Ciszej", emoji="🔉", style=discord.ButtonStyle.secondary, row=1)
     async def vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -129,7 +129,8 @@ class PlayerView(discord.ui.View):
 
     @discord.ui.button(label="Kolejka", emoji="📜", style=discord.ButtonStyle.secondary, row=1)
     async def queue_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.send_message(embed=build_queue_embed(self.player), ephemeral=True)
+        # Toggle queue embed on the same panel message — no new chat spam.
+        await self._ack(interaction, show_queue=not self.show_queue)
 
     @discord.ui.button(label="Wyjdź", emoji="⏏", style=discord.ButtonStyle.danger, row=1)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -142,9 +143,7 @@ class PlayerView(discord.ui.View):
     async def jump(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         value = select.values[0]
         if value == "none":
-            await interaction.response.send_message("Kolejka jest pusta.", ephemeral=True)
+            await self._ack(interaction)
             return
-        track = await self.player.jump_to(int(value))
+        await self.player.jump_to(int(value))
         await self._ack(interaction)
-        if track:
-            await interaction.followup.send(f"Skaczę do **{track.display_title}**", ephemeral=True)
