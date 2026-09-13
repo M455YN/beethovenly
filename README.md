@@ -38,6 +38,14 @@ docker compose logs -f
 
 On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actions writes `.env` from those secrets and runs `docker compose up -d --build` on your self-hosted runner.
 
+### Portainer
+
+1. **Stacks** → **Add stack** → **Repository**: `https://github.com/M455YN/beethovenly.git`, compose path `docker-compose.yml`.
+2. In **Environment variables**, add at least `DISCORD_TOKEN` (same names as `.env.example`).
+3. **Deploy the stack**. Compose maps those vars via `environment:` (no `env_file` required).
+
+If voice audio fails on Linux, edit the stack and uncomment `network_mode: host`.
+
 Join a voice channel and run `/play never gonna give you up`. The control panel appears on the text channel.
 
 ## Features

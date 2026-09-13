@@ -3,14 +3,18 @@ services:
     build: .
     container_name: beethovenly
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      COMMAND_GUILD_ID: ${COMMAND_GUILD_ID:-}
+      BOT_STATUS: ${BOT_STATUS:-/play • beethovenly}
+      IDLE_DISCONNECT_SECONDS: ${IDLE_DISCONNECT_SECONDS:-300}
+      PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
       COOKIES_FILE: ${COOKIES_FILE:-}
+      SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
       - ./data:/app/data
-    # Discord Voice idzie UDP na zewnątrz. Jeśli dźwięk nie dochodzi,
-    # odkomentuj poniższą linię (Linux):
+    # Discord Voice uses outbound UDP. If audio does not reach the channel
+    # on Linux, uncomment:
     # network_mode: host
     logging:
       driver: json-file
