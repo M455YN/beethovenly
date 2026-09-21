@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+log = logging.getLogger("beethovenly")
 
 
 def _int_env(name: str, default: int) -> int:
@@ -28,8 +31,14 @@ class Settings:
     def load(cls) -> Settings:
         token = os.getenv("DISCORD_TOKEN", "").strip()
         guild_raw = os.getenv("COMMAND_GUILD_ID", "").strip()
-        cookies = os.getenv("COOKIES_FILE", "").strip() or None
-        if cookies and not os.path.isfile(cookies):
+        cookies_raw = os.getenv("COOKIES_FILE", "").strip() or None
+        cookies: str | None = cookies_raw
+        if cookies_raw and not os.path.isfile(cookies_raw):
+            log.warning(
+                "COOKIES_FILE is set to %r but the file is missing or unreadable — "
+                "YouTube may block extraction. Mount cookies at that path inside the container.",
+                cookies_raw,
+            )
             cookies = None
         return cls(
             token=token,
