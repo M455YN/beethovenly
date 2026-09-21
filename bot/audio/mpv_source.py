@@ -53,9 +53,9 @@ class MPVPCMSource(discord.AudioSource):
             "--network-timeout=30",
         ]
         if settings.cookies_file:
-            # mpv przekaże cookies do yt-dlp
+            # Pass Netscape cookies.txt into mpv's embedded yt-dlp.
+            # Must be a single ytdl-raw-options value (not a bare "--cookies …" argv).
             cmd.append(f"--ytdl-raw-options=cookies={settings.cookies_file}")
-            cmd.append(f"--cookies {settings.cookies_file}")
         cmd.append(self.url)
         return cmd
 

@@ -44,6 +44,12 @@ class Beethovenly(commands.Bot):
         activity = discord.Activity(type=discord.ActivityType.listening, name=settings.bot_status)
         await self.change_presence(activity=activity)
         log.info("Zalogowany jako %s (%s)", self.user, self.user.id if self.user else "?")
+        if settings.cookies_file:
+            log.info("YouTube cookies: %s", settings.cookies_file)
+        else:
+            log.warning(
+                "YouTube cookies: OFF (set COOKIES_FILE=/app/data/cookies.txt and mount the file)"
+            )
 
 
 def create_bot() -> Beethovenly:
