@@ -9,7 +9,7 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Europe/Warsaw}
-      CHROME_CLI: ${CHROME_CLI:---password-store=basic https://www.youtube.com}
+      CHROME_CLI: ${CHROME_CLI:---password-store=basic https://www.youtube.com/robots.txt}
       CUSTOM_USER: ${CHROMIUM_USER:-}
       PASSWORD: ${CHROMIUM_PASSWORD:-}
     volumes:
@@ -55,6 +55,8 @@ services:
       PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
       COOKIES_FILE: ${COOKIES_FILE:-/app/data/cookies.txt}
       COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-chromium+basictext:/chrome-profile/.config/chromium}
+      # Set to 1 only after exporting from robots.txt (see README) — avoid rotating live cookies.
+      COOKIES_REFRESH: ${COOKIES_REFRESH:-0}
       YOUTUBE_POT_BASE_URL: ${YOUTUBE_POT_BASE_URL:-http://127.0.0.1:4416}
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
