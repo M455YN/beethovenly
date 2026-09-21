@@ -83,8 +83,10 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 | `BOT_STATUS` | text shown in the “Listening to …” status |
 | `IDLE_DISCONNECT_SECONDS` | leave voice after this many idle seconds (`0` = never) |
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
-| `COOKIES_FILE` | `/app/data/cookies.txt` (auto-filled from stack Chromium) |
-| `COOKIES_FROM_BROWSER` | default: `chromium+basictext:/chrome-profile/.config/chromium` |
+| `COOKIES_FILE` | `/app/data/cookies.txt` (from Chromium dump) |
+| `COOKIES_FROM_BROWSER` | default Chromium profile path inside the bot container |
+| `COOKIES_REFRESH` | `1` = force cookie dump once (after robots.txt export); keep `0` otherwise |
+| `YOUTUBE_POT_BASE_URL` | PO token HTTP service (default `http://127.0.0.1:4416`) |
 | `CHROMIUM_BIND` | address for Chromium UI (default `127.0.0.1` = VNC/localhost only) |
 | `CHROMIUM_HTTP_PORT` / `CHROMIUM_HTTPS_PORT` | Chromium web UI ports (default `3000` / `3001`) |
 | `CHROMIUM_USER` / `CHROMIUM_PASSWORD` | optional basic auth for the Chromium UI |
@@ -98,16 +100,20 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 
 ### YouTube cookies (stack Chromium)
 
-Compose runs a **Chromium** sidecar (`lscr.io/linuxserver/chromium`) with a persistent profile. The bot dumps cookies from that profile into `COOKIES_FILE` on every start (`COOKIES_FROM_BROWSER` is set in compose — you do not need a host cron).
+YouTube **rotates** cookies while a normal YouTube tab is open. Dumping from a live session often yields *“cookies are no longer valid”* and bot-check. Follow the [yt-dlp robots.txt export](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) flow:
 
-1. Deploy the stack.
-2. Connect to the server with VNC (or SSH). On the host open `http://127.0.0.1:3000` → log into YouTube. The UI is not published on the LAN (`CHROMIUM_BIND=127.0.0.1`).
-3. Restart container `beethovenly` (entrypoint refreshes `cookies.txt`).
-4. Optional: still set `CHROMIUM_USER` / `CHROMIUM_PASSWORD` for extra protection.
+1. Deploy the stack (`chromium` + `pot-provider` + `beethovenly`). Confirm `beethovenly-pot` is running.
+2. VNC into the host → open `http://127.0.0.1:3000`.
+3. Log into YouTube (throwaway account recommended).
+4. **In the same tab** go to `https://www.youtube.com/robots.txt` and leave **only that tab** open (do not open youtube.com again).
+5. In stack env set `COOKIES_REFRESH=1`, restart **only** `beethovenly`, then set `COOKIES_REFRESH` back to `0`.
+6. Logs should show cookies saved **without** “no longer valid”, and `LOGIN_INFO` present. After that, leave Chromium on `robots.txt` (or closed tabs) — opening YouTube again rotates cookies.
 
-Use a throwaway Google account if possible — cookies are powerful credentials.
+`COOKIES_REFRESH` defaults to `0` so restarts do not overwrite a good `cookies.txt` with rotated garbage.
 
-**Fallback (host browser / cron):** `scripts/refresh-youtube-cookies.sh` can still write into the stack data volume if you prefer not to use the sidecar.## No audio?
+**Fallback (host browser / cron):** `scripts/refresh-youtube-cookies.sh` can still write into the stack data volume if you prefer not to use the sidecar.
+
+## No audio?
 
 Compose already sets `network_mode: host` on Linux so Discord Voice UDP works. Also confirm the bot has Speak / Connect and is not server-muted.
 

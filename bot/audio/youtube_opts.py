@@ -82,11 +82,30 @@ def log_youtube_runtime_status() -> None:
         log.warning("yt-dlp-ejs not installed — pip install 'yt-dlp[default]'")
 
     try:
-        import bgutil_ytdlp_pot_provider  # type: ignore  # noqa: F401
+        from importlib.metadata import version
 
-        log.info("PO token plugin: bgutil-ytdlp-pot-provider (base %s)", pot_provider_base_url())
-    except ImportError:
+        pot_ver = version("bgutil-ytdlp-pot-provider")
+        log.info(
+            "PO token plugin: bgutil-ytdlp-pot-provider %s (base %s)",
+            pot_ver,
+            pot_provider_base_url(),
+        )
+    except Exception:  # noqa: BLE001
         log.warning("bgutil-ytdlp-pot-provider not installed — bot-check more likely on server IPs")
+
+    # Probe POT HTTP sidecar (compose service, bound to localhost).
+    try:
+        import urllib.request
+
+        url = pot_provider_base_url().rstrip("/") + "/"
+        with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310
+            log.info("PO token HTTP OK: %s → %s", url, resp.status)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "PO token HTTP unreachable (%s): %s — start beethovenly-pot / check YOUTUBE_POT_BASE_URL",
+            pot_provider_base_url(),
+            exc,
+        )
 
     if settings.cookies_file and os.path.isfile(settings.cookies_file):
         try:
@@ -97,7 +116,8 @@ def log_youtube_runtime_status() -> None:
         present = [m for m in markers if m in raw]
         missing = [m for m in markers if m not in present]
         log.info("cookie markers present=%s missing=%s", present or "none", missing or "none")
-        if "login_info" not in present and "__secure-1psid" not in present:
+        if "login_info" not in present:
             log.warning(
-                "cookies look anonymous — open Chromium UI, log into YouTube, restart beethovenly"
+                "cookies missing LOGIN_INFO — in Chromium open ONLY "
+                "https://www.youtube.com/robots.txt after login, then COOKIES_REFRESH=1 + restart"
             )
