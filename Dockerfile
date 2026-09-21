@@ -5,12 +5,26 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+ARG TARGETARCH
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         mpv \
         libopus0 \
         ca-certificates \
+        curl \
+        unzip \
         tini \
+    && case "${TARGETARCH}" in \
+         amd64) DENO_ARCH=x86_64 ;; \
+         arm64) DENO_ARCH=aarch64 ;; \
+         *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/denoland/deno/releases/download/v2.5.6/deno-${DENO_ARCH}-unknown-linux-gnu.zip" \
+         -o /tmp/deno.zip \
+    && unzip -q /tmp/deno.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && rm -f /tmp/deno.zip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

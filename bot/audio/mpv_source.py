@@ -10,6 +10,7 @@ from typing import IO
 
 import discord
 
+from bot.audio.youtube_opts import youtube_extractor_args_cli
 from bot.config import settings
 
 log = logging.getLogger("beethovenly.mpv")
@@ -50,9 +51,13 @@ class MPVPCMSource(discord.AudioSource):
             "--no-warnings",
             "--no-playlist",
             "--no-progress",
-            # Bypass common "confirm you're not a bot" gates on web client.
+            # Deno + EJS solve YouTube nsig challenges (required with cookies).
+            "--js-runtimes",
+            "deno",
+            "--remote-components",
+            "ejs:github",
             "--extractor-args",
-            "youtube:player_client=android_vr,tv,web_safari",
+            youtube_extractor_args_cli(),
         ]
         if settings.cookies_file:
             cmd.extend(["--cookies", settings.cookies_file])
