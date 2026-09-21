@@ -3,6 +3,8 @@ services:
     build: .
     container_name: beethovenly
     restart: unless-stopped
+    # Discord Voice needs real UDP. Host networking avoids Docker NAT issues on Linux.
+    network_mode: host
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       COMMAND_GUILD_ID: ${COMMAND_GUILD_ID:-}
@@ -13,9 +15,6 @@ services:
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
       - ./data:/app/data
-    # Discord Voice uses outbound UDP. If audio does not reach the channel
-    # on Linux, uncomment:
-    # network_mode: host
     logging:
       driver: json-file
       options:
