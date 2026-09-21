@@ -29,31 +29,31 @@ def test_ytdlp_command_streams_stdout_with_cookies(monkeypatch) -> None:
         "bot.audio.youtube_opts.settings",
         SimpleNamespace(cookies_file="/app/data/cookies.txt", cookies_from_browser=None),
     )
+    from bot.audio.mpv_source import _StreamStrategy
+
     src = MPVPCMSource("https://www.youtube.com/watch?v=dQw4w9wgGcQ")
-    cmd = src._ytdlp_command()
+    strategy = _StreamStrategy("cookies+mweb", "mweb,tv,web_safari,web", True)
+    cmd = src._ytdlp_command(strategy)
     assert cmd[1:3] == ["-m", "yt_dlp"]
     assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "-"
     assert "--cookies" in cmd
     assert cmd[cmd.index("--cookies") + 1] == "/app/data/cookies.txt"
     assert "--js-runtimes" in cmd and "deno" in cmd
     assert "--remote-components" in cmd and "ejs:github" in cmd
-    assert "--extractor-args" in cmd
-    args = cmd[cmd.index("--extractor-args") + 1]
-    assert "mweb" in args
-    assert "android_vr" not in args
+    assert any("youtubepot-bgutilhttp" in a for a in cmd)
+    assert any("player_client=mweb" in a for a in cmd)
     assert cmd[-1] == "https://www.youtube.com/watch?v=dQw4w9wgGcQ"
 
 
-def test_ytdlp_command_anon_uses_android_vr(monkeypatch) -> None:
+def test_ytdlp_command_anon_omits_cookies(monkeypatch) -> None:
     monkeypatch.setattr(
         "bot.audio.mpv_source.settings",
-        SimpleNamespace(cookies_file=None, cookies_from_browser=None),
+        SimpleNamespace(cookies_file="/app/data/cookies.txt", cookies_from_browser=None),
     )
-    monkeypatch.setattr(
-        "bot.audio.youtube_opts.settings",
-        SimpleNamespace(cookies_file=None, cookies_from_browser=None),
-    )
+    from bot.audio.mpv_source import _StreamStrategy
+
     src = MPVPCMSource("https://www.youtube.com/watch?v=dQw4w9wgGcQ")
-    cmd = src._ytdlp_command()
-    args = cmd[cmd.index("--extractor-args") + 1]
-    assert "android_vr" in args
+    strategy = _StreamStrategy("anon+android_vr", "android_vr,tv,web_safari", False)
+    cmd = src._ytdlp_command(strategy)
+    assert "--cookies" not in cmd
+    assert any("android_vr" in a for a in cmd)

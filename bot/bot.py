@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from bot.audio.player import GuildPlayer
+from bot.audio.youtube_opts import log_youtube_runtime_status
 from bot.config import settings
 
 log = logging.getLogger("beethovenly")
@@ -68,6 +69,7 @@ class Beethovenly(commands.Bot):
                 "YouTube cookies: OFF — set COOKIES_FILE=/app/data/cookies.txt "
                 "or COOKIES_FROM_BROWSER=chrome (see README)"
             )
+        log_youtube_runtime_status()
 
 
 def create_bot() -> Beethovenly:
