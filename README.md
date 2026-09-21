@@ -42,9 +42,10 @@ On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actio
 
 1. **Stacks** → **Add stack** → **Repository**: `https://github.com/M455YN/beethovenly.git`, compose path `docker-compose.yml`.
 2. In **Environment variables**, add at least `DISCORD_TOKEN` (same names as `.env.example`).
-3. **Deploy the stack**. Compose maps those vars via `environment:` (no `env_file` required).
+3. For YouTube, also set `COOKIES_FILE=/app/data/cookies.txt` and place `cookies.txt` in the stack data volume.
+4. **Deploy the stack**. Compose uses `network_mode: host` on Linux so Discord Voice UDP works.
 
-If voice audio fails on Linux, edit the stack and uncomment `network_mode: host`.
+If audio still fails, check container logs for `yt-dlp:` / `mpv:` lines and refresh cookies.
 
 Join a voice channel and run `/play never gonna give you up`. The control panel appears on the text channel.
 
@@ -99,19 +100,15 @@ COOKIES_FILE=/app/data/cookies.txt
 
 ## No audio?
 
-On some hosts NAT breaks UDP to Discord Voice. In `docker-compose.yml`, uncomment:
-
-```yaml
-network_mode: host
-```
-
-(Linux). Also confirm the bot has Speak / Connect and is not server-muted.
+Compose already sets `network_mode: host` on Linux so Discord Voice UDP works. Also confirm the bot has Speak / Connect and is not server-muted.
 
 If the bot shows an offline panel and logs `WebSocket closed with 4006`, update voice deps:
 
 ```bash
 .venv/bin/python -m pip install -U 'discord.py[voice]==2.7.1'
 ```
+
+If tracks skip immediately, check logs for YouTube bot-checks and refresh `COOKIES_FILE`.
 
 ## Commands
 
@@ -122,8 +119,8 @@ Most controls are on the panel — slash commands are a fallback.
 ## How playback works
 
 ```
-/play  →  yt-dlp (metadata + URL)
-       →  mpv decodes to PCM s16le 48 kHz stereo on stdout
+/play  →  yt-dlp (metadata)
+       →  yt-dlp -o - | mpv -   (stream + decode to PCM s16le 48 kHz stereo)
        →  discord.py sends frames to Voice
 ```
 
