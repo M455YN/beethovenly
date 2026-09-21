@@ -32,6 +32,9 @@ _BASE_OPTS: dict[str, Any] = {
     "source_address": "0.0.0.0",
     "cachedir": False,
     "noplaylist": False,
+    # Prefer clients that currently avoid PO-token / bot-gate failures.
+    # android_vr does not require a PO token for typical public videos.
+    "extractor_args": {"youtube": {"player_client": ["android_vr", "tv", "web_safari"]}},
 }
 
 
@@ -41,8 +44,15 @@ class ExtractionError(RuntimeError):
 
 def _opts(*, search: bool = False, playlist: bool = True) -> dict[str, Any]:
     opts = dict(_BASE_OPTS)
+    opts["extractor_args"] = {
+        "youtube": {"player_client": list(_BASE_OPTS["extractor_args"]["youtube"]["player_client"])}
+    }
+    # Prefer a Netscape cookies file (fast, no browser DB lock). Fall back to
+    # live --cookies-from-browser when COOKIES_FROM_BROWSER is set alone.
     if settings.cookies_file:
         opts["cookiefile"] = settings.cookies_file
+    elif settings.cookies_from_browser_tuple:
+        opts["cookiesfrombrowser"] = settings.cookies_from_browser_tuple
     if search:
         opts["default_search"] = "ytsearch"
         opts["noplaylist"] = True

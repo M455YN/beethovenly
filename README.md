@@ -42,7 +42,7 @@ On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actio
 
 1. **Stacks** → **Add stack** → **Repository**: `https://github.com/M455YN/beethovenly.git`, compose path `docker-compose.yml`.
 2. In **Environment variables**, add at least `DISCORD_TOKEN` (same names as `.env.example`).
-3. For YouTube, also set `COOKIES_FILE=/app/data/cookies.txt` and place `cookies.txt` in the stack data volume.
+3. For YouTube, set `COOKIES_FILE=/app/data/cookies.txt` and keep `cookies.txt` in the stack data volume. Prefer refreshing it with `scripts/refresh-youtube-cookies.sh` on the host (cron) instead of re-exporting by hand — see **YouTube cookies** below.
 4. **Deploy the stack**. Compose uses `network_mode: host` on Linux so Discord Voice UDP works.
 
 If audio still fails, check container logs for `yt-dlp:` / `mpv:` lines and refresh cookies.
@@ -84,6 +84,7 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 | `IDLE_DISCONNECT_SECONDS` | leave voice after this many idle seconds (`0` = never) |
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
 | `COOKIES_FILE` | `/app/data/cookies.txt` when YouTube blocks or age-gates |
+| `COOKIES_FROM_BROWSER` | optional `chrome` / `firefox` / `chrome:/path` — dump cookies on container start |
 | `SKIP_YTDLP_UPDATE` | `1` = do not update yt-dlp on container start |
 
 ### GitHub Secrets
@@ -92,12 +93,44 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 2. Add `DISCORD_TOKEN` (required) and optionally `COMMAND_GUILD_ID`.
 3. Register a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners) on the machine that should run Docker, then push to `main` or run **Deploy** manually.
 
-Cookies: export a `cookies.txt` (browser extension) and place it at `data/cookies.txt`. In `.env`:
+### YouTube cookies (no more hand-export every time)
+
+YouTube often needs Netscape cookies. Two durable options:
+
+**A — Host cron (recommended for Docker / Portainer)**  
+On the machine where you're logged into YouTube in a browser, refresh the cookies file that the container already mounts:
+
+```bash
+# Portainer volume example — adjust the path to your stack data dir
+./scripts/refresh-youtube-cookies.sh /data/compose/31/data/cookies.txt
+
+# Flatpak Chrome on Linux
+COOKIES_FROM_BROWSER='chrome:~/.var/app/com.google.Chrome/' \
+  ./scripts/refresh-youtube-cookies.sh /data/compose/31/data/cookies.txt
+```
+
+Cron once a day (while that browser stays logged into YouTube):
+
+```
+15 8 * * * /path/to/beethovenly/scripts/refresh-youtube-cookies.sh /data/compose/31/data/cookies.txt
+```
+
+In the stack env keep:
 
 ```
 COOKIES_FILE=/app/data/cookies.txt
 ```
 
+**B — Mount browser profile into the container**  
+Set `COOKIES_FROM_BROWSER` and mount the profile (see comments in `docker-compose.yml`). The entrypoint dumps cookies into `COOKIES_FILE` on each start. Prefer Firefox if Chrome fails with a keyring/decrypt error inside Docker.
+
+One-shot export without third-party extensions (yt-dlp FAQ):
+
+```bash
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+```
+
+Treat `cookies.txt` as a secret — it can contain cookies for every site in that browser until filtered by the refresh script.
 ## No audio?
 
 Compose already sets `network_mode: host` on Linux so Discord Voice UDP works. Also confirm the bot has Speak / Connect and is not server-muted.

@@ -37,6 +37,7 @@ class MPVPCMSource(discord.AudioSource):
 
     def _ytdlp_command(self) -> list[str]:
         # Prefer ``python -m yt_dlp`` so Docker's pip-updated binary is used.
+        # Stream to stdout; mpv reads stdin (yt-dlp FAQ pattern).
         cmd = [
             sys.executable,
             "-m",
@@ -49,9 +50,14 @@ class MPVPCMSource(discord.AudioSource):
             "--no-warnings",
             "--no-playlist",
             "--no-progress",
+            # Bypass common "confirm you're not a bot" gates on web client.
+            "--extractor-args",
+            "youtube:player_client=android_vr,tv,web_safari",
         ]
         if settings.cookies_file:
             cmd.extend(["--cookies", settings.cookies_file])
+        elif settings.cookies_from_browser:
+            cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
         cmd.extend(["--", self.url])
         return cmd
 

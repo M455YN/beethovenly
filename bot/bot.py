@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
 import discord
 from discord.ext import commands
 
@@ -45,10 +47,26 @@ class Beethovenly(commands.Bot):
         await self.change_presence(activity=activity)
         log.info("Zalogowany jako %s (%s)", self.user, self.user.id if self.user else "?")
         if settings.cookies_file:
-            log.info("YouTube cookies: %s", settings.cookies_file)
+            try:
+                raw = Path(settings.cookies_file).read_text(encoding="utf-8", errors="replace")
+                yt_lines = sum(
+                    1
+                    for line in raw.splitlines()
+                    if line and not line.startswith("#") and "youtube.com" in line.lower()
+                )
+            except OSError:
+                yt_lines = -1
+            log.info("YouTube cookies: %s (%s youtube.com entries)", settings.cookies_file, yt_lines)
+            if yt_lines == 0:
+                log.warning(
+                    "cookies file has no youtube.com rows — re-export while logged into YouTube"
+                )
+        elif settings.cookies_from_browser:
+            log.info("YouTube cookies: from browser (%s)", settings.cookies_from_browser)
         else:
             log.warning(
-                "YouTube cookies: OFF (set COOKIES_FILE=/app/data/cookies.txt and mount the file)"
+                "YouTube cookies: OFF — set COOKIES_FILE=/app/data/cookies.txt "
+                "or COOKIES_FROM_BROWSER=chrome (see README)"
             )
 
 

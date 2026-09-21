@@ -31,4 +31,6 @@ def test_ytdlp_command_streams_stdout_with_cookies(monkeypatch) -> None:
     assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "-"
     assert "--cookies" in cmd
     assert cmd[cmd.index("--cookies") + 1] == "/app/data/cookies.txt"
+    assert "--extractor-args" in cmd
+    assert "android_vr" in cmd[cmd.index("--extractor-args") + 1]
     assert cmd[-1] == "https://www.youtube.com/watch?v=dQw4w9wgGcQ"

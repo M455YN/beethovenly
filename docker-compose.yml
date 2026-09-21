@@ -11,10 +11,18 @@ services:
       BOT_STATUS: ${BOT_STATUS:-/play • beethovenly}
       IDLE_DISCONNECT_SECONDS: ${IDLE_DISCONNECT_SECONDS:-300}
       PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
-      COOKIES_FILE: ${COOKIES_FILE:-}
+      COOKIES_FILE: ${COOKIES_FILE:-/app/data/cookies.txt}
+      # Optional: dump cookies from a mounted browser profile on each start.
+      # COOKIES_FROM_BROWSER: chrome:/chrome-profile
+      # COOKIES_FROM_BROWSER: firefox:/firefox-profile
+      COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-}
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
       - ./data:/app/data
+      # Mount a logged-in browser profile only if using COOKIES_FROM_BROWSER:
+      # - /home/YOU/.config/google-chrome:/chrome-profile:ro
+      # - Flatpak Chrome: /home/YOU/.var/app/com.google.Chrome:/chrome-profile:ro
+      # - Firefox: /home/YOU/.mozilla/firefox:/firefox-profile:ro
     logging:
       driver: json-file
       options:
