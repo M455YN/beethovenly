@@ -2,8 +2,9 @@
 set -eu
 
 if [ "${SKIP_YTDLP_UPDATE:-0}" != "1" ]; then
-  echo "Aktualizacja yt-dlp (+ ejs)…"
-  pip install --user -U "yt-dlp[default]" || echo "Nie udało się zaktualizować yt-dlp — jadę na wersji z obrazu."
+  echo "Aktualizacja yt-dlp (+ ejs + pot plugin)…"
+  pip install --user -U "yt-dlp[default]" bgutil-ytdlp-pot-provider \
+    || echo "Nie udało się zaktualizować yt-dlp — jadę na wersji z obrazu."
 fi
 
 if command -v deno >/dev/null 2>&1; then

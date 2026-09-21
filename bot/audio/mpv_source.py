@@ -1,21 +1,37 @@
 from __future__ import annotations
 
 import logging
-import os
 import signal
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from typing import IO
 
 import discord
 
-from bot.audio.youtube_opts import youtube_extractor_args_cli
+from bot.audio.youtube_opts import ytdlp_extractor_args_cli
 from bot.config import settings
 
 log = logging.getLogger("beethovenly.mpv")
 
 FRAME_SIZE = 3840  # 20 ms * 48000 Hz * 2 ch * 2 B
+
+
+@dataclass(frozen=True)
+class _StreamStrategy:
+    name: str
+    clients: str
+    use_cookies: bool
+
+
+# Order: cookies+web (needs PO/EJS) → anon android_vr → cookies+android_vr last resort.
+_STRATEGIES: tuple[_StreamStrategy, ...] = (
+    _StreamStrategy("cookies+mweb", "mweb,tv,web_safari,web", True),
+    _StreamStrategy("cookies+tv", "tv,tv_simply,mweb", True),
+    _StreamStrategy("anon+android_vr", "android_vr,tv,web_safari", False),
+    _StreamStrategy("cookies+android_vr", "android_vr", True),
+)
 
 
 class MPVPCMSource(discord.AudioSource):
@@ -35,10 +51,34 @@ class MPVPCMSource(discord.AudioSource):
         self._started = False
         self.failed = False
         self.fail_reason = ""
+        self._strategy: _StreamStrategy | None = None
 
-    def _ytdlp_command(self) -> list[str]:
-        # Prefer ``python -m yt_dlp`` so Docker's pip-updated binary is used.
-        # Stream to stdout; mpv reads stdin (yt-dlp FAQ pattern).
+    def _ytdlp_common(self, strategy: _StreamStrategy) -> list[str]:
+        cmd = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "-f",
+            "bestaudio/best",
+            "--no-playlist",
+            "--no-progress",
+            "--js-runtimes",
+            "deno",
+            "--remote-components",
+            "ejs:github",
+            *ytdlp_extractor_args_cli(player_clients=strategy.clients, cookies=strategy.use_cookies),
+        ]
+        if strategy.use_cookies and settings.cookies_file:
+            cmd.extend(["--cookies", settings.cookies_file])
+        elif strategy.use_cookies and settings.cookies_from_browser:
+            cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
+        return cmd
+
+    def _ytdlp_command(self, strategy: _StreamStrategy | None = None) -> list[str]:
+        strategy = strategy or self._strategy or _STRATEGIES[0]
+        cmd = self._ytdlp_common(strategy)
+        # Insert stream flags after module name args: quiet + stdout.
+        # Rebuild cleanly for streaming.
         cmd = [
             sys.executable,
             "-m",
@@ -51,20 +91,55 @@ class MPVPCMSource(discord.AudioSource):
             "--no-warnings",
             "--no-playlist",
             "--no-progress",
-            # Deno + EJS solve YouTube nsig challenges (required with cookies).
             "--js-runtimes",
             "deno",
             "--remote-components",
             "ejs:github",
-            "--extractor-args",
-            youtube_extractor_args_cli(),
+            *ytdlp_extractor_args_cli(player_clients=strategy.clients, cookies=strategy.use_cookies),
         ]
-        if settings.cookies_file:
+        if strategy.use_cookies and settings.cookies_file:
             cmd.extend(["--cookies", settings.cookies_file])
-        elif settings.cookies_from_browser:
+        elif strategy.use_cookies and settings.cookies_from_browser:
             cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
         cmd.extend(["--", self.url])
         return cmd
+
+    def _pick_strategy(self) -> _StreamStrategy:
+        """Probe with ``yt-dlp -g`` until one strategy yields a media URL."""
+        available = [
+            s
+            for s in _STRATEGIES
+            if (not s.use_cookies) or settings.cookies_file or settings.cookies_from_browser
+        ]
+
+        errors: list[str] = []
+        for strategy in available:
+            cmd = [
+                *self._ytdlp_common(strategy),
+                "-g",
+                "--",
+                self.url,
+            ]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                errors.append(f"{strategy.name}: timeout")
+                continue
+            if proc.returncode == 0 and proc.stdout.strip():
+                log.info("yt-dlp strategy ok: %s", strategy.name)
+                return strategy
+            err = (proc.stderr or proc.stdout or "").strip().splitlines()
+            brief = err[-1] if err else f"exit {proc.returncode}"
+            errors.append(f"{strategy.name}: {brief}")
+            log.warning("yt-dlp strategy failed (%s): %s", strategy.name, brief)
+
+        raise RuntimeError("all yt-dlp strategies failed:\n" + "\n".join(errors))
 
     def _mpv_command(self) -> list[str]:
         return [
@@ -98,9 +173,16 @@ class MPVPCMSource(discord.AudioSource):
             return
         self._started = True
         log.info("yt-dlp | mpv pipe start: %s", self.url)
+        try:
+            self._strategy = self._pick_strategy()
+        except RuntimeError as exc:
+            self.failed = True
+            self.fail_reason = str(exc)
+            log.warning("%s", exc)
+            raise
 
         self._ytdlp = subprocess.Popen(
-            self._ytdlp_command(),
+            self._ytdlp_command(self._strategy),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,

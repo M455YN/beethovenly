@@ -133,7 +133,7 @@ Most controls are on the panel — slash commands are a fallback.
        →  discord.py sends frames to Voice
 ```
 
-There is no ffmpeg in the playback pipeline. `yt-dlp` is updated on container start because YouTube breaks often. The image includes **Deno** and `yt-dlp[default]` (EJS) so logged-in cookies can solve YouTube JS challenges.
+There is no ffmpeg in the playback pipeline. `yt-dlp` is updated on container start because YouTube breaks often. The image includes **Deno** and `yt-dlp[default]` (EJS). Compose also runs **bgutil pot-provider** on `127.0.0.1:4416` so server IPs can pass YouTube bot checks when cookies alone are not enough.
 
 ## Tests
 
