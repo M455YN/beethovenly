@@ -1,10 +1,40 @@
 services:
+  # Persistent Chromium with web UI (one-time YouTube login).
+  # Open http://HOST:3000 → log into YouTube → restart beethovenly so cookies refresh.
+  chromium:
+    image: lscr.io/linuxserver/chromium:latest
+    container_name: beethovenly-chromium
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Warsaw}
+      # basic password store → yt-dlp can decrypt with +basictext (no host keyring)
+      CHROME_CLI: ${CHROME_CLI:---password-store=basic https://www.youtube.com}
+      CUSTOM_USER: ${CHROMIUM_USER:-}
+      PASSWORD: ${CHROMIUM_PASSWORD:-}
+    volumes:
+      - chromium-config:/config
+    # Bind to loopback only — open http://127.0.0.1:3000 after VNC/SSH into the host.
+    # Not reachable from the LAN/internet unless you change CHROMIUM_BIND.
+    ports:
+      - "${CHROMIUM_BIND:-127.0.0.1}:${CHROMIUM_HTTP_PORT:-3000}:3000"
+      - "${CHROMIUM_BIND:-127.0.0.1}:${CHROMIUM_HTTPS_PORT:-3001}:3001"
+    shm_size: "1gb"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   beethovenly:
     build: .
     container_name: beethovenly
     restart: unless-stopped
     # Discord Voice needs real UDP. Host networking avoids Docker NAT issues on Linux.
     network_mode: host
+    depends_on:
+      - chromium
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       COMMAND_GUILD_ID: ${COMMAND_GUILD_ID:-}
@@ -12,19 +42,17 @@ services:
       IDLE_DISCONNECT_SECONDS: ${IDLE_DISCONNECT_SECONDS:-300}
       PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
       COOKIES_FILE: ${COOKIES_FILE:-/app/data/cookies.txt}
-      # Optional: dump cookies from a mounted browser profile on each start.
-      # COOKIES_FROM_BROWSER: chrome:/chrome-profile
-      # COOKIES_FROM_BROWSER: firefox:/firefox-profile
-      COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-}
+      # Dump cookies from the stack Chromium profile on each bot start.
+      COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-chromium+basictext:/chrome-profile/.config/chromium}
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
       - ./data:/app/data
-      # Mount a logged-in browser profile only if using COOKIES_FROM_BROWSER:
-      # - /home/YOU/.config/google-chrome:/chrome-profile:ro
-      # - Flatpak Chrome: /home/YOU/.var/app/com.google.Chrome:/chrome-profile:ro
-      # - Firefox: /home/YOU/.mozilla/firefox:/firefox-profile:ro
+      - chromium-config:/chrome-profile:ro
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  chromium-config:

@@ -11,6 +11,10 @@ from bot.cookies import parse_cookies_from_browser
         ("chrome", ("chrome", None, None, None)),
         ("firefox", ("firefox", None, None, None)),
         (
+            "chromium+basictext:/chrome-profile/.config/chromium",
+            ("chromium", "/chrome-profile/.config/chromium", "BASICTEXT", None),
+        ),
+        (
             "chrome:~/.var/app/com.google.Chrome/",
             ("chrome", "~/.var/app/com.google.Chrome/", None, None),
         ),
