@@ -2,8 +2,14 @@
 set -eu
 
 if [ "${SKIP_YTDLP_UPDATE:-0}" != "1" ]; then
-  echo "Aktualizacja yt-dlp…"
-  pip install --user -U yt-dlp || echo "Nie udało się zaktualizować yt-dlp — jadę na wersji z obrazu."
+  echo "Aktualizacja yt-dlp (+ ejs)…"
+  pip install --user -U "yt-dlp[default]" || echo "Nie udało się zaktualizować yt-dlp — jadę na wersji z obrazu."
+fi
+
+if command -v deno >/dev/null 2>&1; then
+  echo "Deno JS runtime: $(deno --version | head -n 1)"
+else
+  echo "WARN: brak deno w PATH — YouTube z cookies może padać (The page needs to be reloaded)."
 fi
 
 COOKIES_OUT="${COOKIES_FILE:-/app/data/cookies.txt}"
