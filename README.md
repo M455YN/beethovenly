@@ -42,10 +42,10 @@ On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actio
 
 1. **Stacks** → **Add stack** → **Repository**: `https://github.com/M455YN/beethovenly.git`, compose path `docker-compose.yml`.
 2. In **Environment variables**, add at least `DISCORD_TOKEN` (same names as `.env.example`).
-3. For YouTube, also set `COOKIES_FILE=/app/data/cookies.txt` and place `cookies.txt` in the stack data volume.
-4. **Deploy the stack**. Compose uses `network_mode: host` on Linux so Discord Voice UDP works.
+3. Redeploy the stack. Chromium UI is bound to **localhost only** (`127.0.0.1:3000`). Connect to the server over VNC (or SSH), open `http://127.0.0.1:3000` on the host, log into YouTube once, then restart `beethovenly` so it dumps cookies.
+4. Compose uses `network_mode: host` on the bot (Linux) so Discord Voice UDP works. To expose Chromium on the LAN (not recommended), set `CHROMIUM_BIND=0.0.0.0`.
 
-If audio still fails, check container logs for `yt-dlp:` / `mpv:` lines and refresh cookies.
+If audio still fails, check container logs for `yt-dlp:` / `mpv:` / `Cookies` lines and re-login in Chromium.
 
 Join a voice channel and run `/play never gonna give you up`. The control panel appears on the text channel.
 
@@ -83,7 +83,11 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 | `BOT_STATUS` | text shown in the “Listening to …” status |
 | `IDLE_DISCONNECT_SECONDS` | leave voice after this many idle seconds (`0` = never) |
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
-| `COOKIES_FILE` | `/app/data/cookies.txt` when YouTube blocks or age-gates |
+| `COOKIES_FILE` | `/app/data/cookies.txt` (auto-filled from stack Chromium) |
+| `COOKIES_FROM_BROWSER` | default: `chromium+basictext:/chrome-profile/.config/chromium` |
+| `CHROMIUM_BIND` | address for Chromium UI (default `127.0.0.1` = VNC/localhost only) |
+| `CHROMIUM_HTTP_PORT` / `CHROMIUM_HTTPS_PORT` | Chromium web UI ports (default `3000` / `3001`) |
+| `CHROMIUM_USER` / `CHROMIUM_PASSWORD` | optional basic auth for the Chromium UI |
 | `SKIP_YTDLP_UPDATE` | `1` = do not update yt-dlp on container start |
 
 ### GitHub Secrets
@@ -92,13 +96,18 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 2. Add `DISCORD_TOKEN` (required) and optionally `COMMAND_GUILD_ID`.
 3. Register a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners) on the machine that should run Docker, then push to `main` or run **Deploy** manually.
 
-Cookies: export a `cookies.txt` (browser extension) and place it at `data/cookies.txt`. In `.env`:
+### YouTube cookies (stack Chromium)
 
-```
-COOKIES_FILE=/app/data/cookies.txt
-```
+Compose runs a **Chromium** sidecar (`lscr.io/linuxserver/chromium`) with a persistent profile. The bot dumps cookies from that profile into `COOKIES_FILE` on every start (`COOKIES_FROM_BROWSER` is set in compose — you do not need a host cron).
 
-## No audio?
+1. Deploy the stack.
+2. Connect to the server with VNC (or SSH). On the host open `http://127.0.0.1:3000` → log into YouTube. The UI is not published on the LAN (`CHROMIUM_BIND=127.0.0.1`).
+3. Restart container `beethovenly` (entrypoint refreshes `cookies.txt`).
+4. Optional: still set `CHROMIUM_USER` / `CHROMIUM_PASSWORD` for extra protection.
+
+Use a throwaway Google account if possible — cookies are powerful credentials.
+
+**Fallback (host browser / cron):** `scripts/refresh-youtube-cookies.sh` can still write into the stack data volume if you prefer not to use the sidecar.## No audio?
 
 Compose already sets `network_mode: host` on Linux so Discord Voice UDP works. Also confirm the bot has Speak / Connect and is not server-muted.
 

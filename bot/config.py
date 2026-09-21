@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from bot.cookies import parse_cookies_from_browser
+
 load_dotenv()
 
 log = logging.getLogger("beethovenly")
@@ -26,6 +28,8 @@ class Settings:
     idle_disconnect_seconds: int
     playlist_limit: int
     cookies_file: str | None
+    cookies_from_browser: str | None
+    cookies_from_browser_tuple: tuple[str, str | None, str | None, str | None] | None
 
     @classmethod
     def load(cls) -> Settings:
@@ -40,6 +44,16 @@ class Settings:
                 cookies_raw,
             )
             cookies = None
+
+        browser_raw = os.getenv("COOKIES_FROM_BROWSER", "").strip() or None
+        browser_tuple = None
+        if browser_raw:
+            try:
+                browser_tuple = parse_cookies_from_browser(browser_raw)
+            except ValueError as exc:
+                log.warning("%s — ignoring COOKIES_FROM_BROWSER", exc)
+                browser_raw = None
+
         return cls(
             token=token,
             command_guild_id=int(guild_raw) if guild_raw else None,
@@ -47,6 +61,8 @@ class Settings:
             idle_disconnect_seconds=max(0, _int_env("IDLE_DISCONNECT_SECONDS", 300)),
             playlist_limit=max(1, min(_int_env("PLAYLIST_LIMIT", 50), 200)),
             cookies_file=cookies,
+            cookies_from_browser=browser_raw,
+            cookies_from_browser_tuple=browser_tuple,
         )
 
 
