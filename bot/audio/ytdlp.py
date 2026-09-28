@@ -10,7 +10,7 @@ import discord
 import yt_dlp
 
 from bot.audio.track import Track, track_from_info
-from bot.audio.youtube_opts import apply_youtube_opts
+from bot.audio.youtube_opts import apply_youtube_opts, cookies_look_usable
 from bot.config import settings
 from bot.utils import is_http_url
 
@@ -41,12 +41,13 @@ class ExtractionError(RuntimeError):
 
 
 def _opts(*, search: bool = False, playlist: bool = True) -> dict[str, Any]:
-    opts = apply_youtube_opts(dict(_BASE_OPTS))
-    # Prefer a Netscape cookies file (fast, no browser DB lock). Fall back to
-    # live --cookies-from-browser when COOKIES_FROM_BROWSER is set alone.
-    if settings.cookies_file:
+    # Anon / Wagner-style by default. Cookies only when the session looks real —
+    # bad dumps trigger YouTube bot-check more often than no cookies.
+    use_cookies = cookies_look_usable()
+    opts = apply_youtube_opts(dict(_BASE_OPTS), force_cookies=use_cookies)
+    if use_cookies and settings.cookies_file:
         opts["cookiefile"] = settings.cookies_file
-    elif settings.cookies_from_browser_tuple:
+    elif use_cookies and settings.cookies_from_browser_tuple:
         opts["cookiesfrombrowser"] = settings.cookies_from_browser_tuple
     if search:
         opts["default_search"] = "ytsearch"

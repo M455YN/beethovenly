@@ -1,7 +1,8 @@
 services:
-  # Persistent Chromium with web UI (one-time YouTube login).
-  # After VNC: http://127.0.0.1:3000 → log into YouTube → restart beethovenly.
+  # Optional: Chromium UI for exporting YouTube cookies when anon/mpv+ytdl is blocked.
+  # Start with: docker compose --profile cookies up -d
   chromium:
+    profiles: ["cookies"]
     image: lscr.io/linuxserver/chromium:latest
     container_name: beethovenly-chromium
     restart: unless-stopped
@@ -24,8 +25,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Proof-of-origin tokens for yt-dlp (helps bypass YouTube bot-check on server IPs).
+  # Optional: PO tokens for yt-dlp when server IPs get YouTube bot-check.
   pot-provider:
+    profiles: ["cookies"]
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     container_name: beethovenly-pot
     restart: unless-stopped
@@ -42,20 +44,16 @@ services:
     container_name: beethovenly
     restart: unless-stopped
     # Discord Voice needs real UDP. Host networking avoids Docker NAT issues on Linux.
-    # Also reaches pot-provider at 127.0.0.1:4416.
     network_mode: host
-    depends_on:
-      - chromium
-      - pot-provider
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       COMMAND_GUILD_ID: ${COMMAND_GUILD_ID:-}
       BOT_STATUS: ${BOT_STATUS:-/play • beethovenly}
       IDLE_DISCONNECT_SECONDS: ${IDLE_DISCONNECT_SECONDS:-300}
       PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
-      COOKIES_FILE: ${COOKIES_FILE:-/app/data/cookies.txt}
-      COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-chromium+basictext:/chrome-profile/.config/chromium}
-      # Set to 1 only after exporting from robots.txt (see README) — avoid rotating live cookies.
+      # Cookies are optional — leave unset for Wagner-style mpv+ytdl / anon playback.
+      COOKIES_FILE: ${COOKIES_FILE:-}
+      COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-}
       COOKIES_REFRESH: ${COOKIES_REFRESH:-0}
       YOUTUBE_POT_BASE_URL: ${YOUTUBE_POT_BASE_URL:-http://127.0.0.1:4416}
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}

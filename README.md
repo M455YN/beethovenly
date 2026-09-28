@@ -4,7 +4,9 @@
 
 # Beethovenly
 
-A Discord music bot that joins voice, pulls audio with **yt-dlp**, decodes it with **mpv**, and streams it to the voice channel. A button panel stays on the text channel for pause, skip, volume, loop, and queue.
+A Discord music bot that joins voice, plays URLs with **mpv** (same idea as WagnerBot’s local player), falls back to **yt-dlp** when needed, and streams PCM to the voice channel. A button panel stays on the text channel for pause, skip, volume, loop, and queue.
+
+**YouTube cookies are optional.** By default the bot plays like Wagner — `mpv` opens the URL with built-in ytdl, then anon yt-dlp clients. No Chromium login required for a normal `/play`.
 
 ## Quick start (Docker)
 
@@ -42,10 +44,8 @@ On push to `main` (or via **Actions → Deploy → Run workflow**), GitHub Actio
 
 1. **Stacks** → **Add stack** → **Repository**: `https://github.com/M455YN/beethovenly.git`, compose path `docker-compose.yml`.
 2. In **Environment variables**, add at least `DISCORD_TOKEN` (same names as `.env.example`).
-3. Redeploy the stack. Chromium UI is bound to **localhost only** (`127.0.0.1:3000`). Connect to the server over VNC (or SSH), open `http://127.0.0.1:3000` on the host, log into YouTube once, then restart `beethovenly` so it dumps cookies.
-4. Compose uses `network_mode: host` on the bot (Linux) so Discord Voice UDP works. To expose Chromium on the LAN (not recommended), set `CHROMIUM_BIND=0.0.0.0`.
-
-If audio still fails, check container logs for `yt-dlp:` / `mpv:` / `Cookies` lines and re-login in Chromium.
+3. Redeploy. Only the `beethovenly` service is required — Chromium/pot stay off unless you use profile `cookies`.
+4. Compose uses `network_mode: host` on the bot (Linux) so Discord Voice UDP works.
 
 Join a voice channel and run `/play never gonna give you up`. The control panel appears on the text channel.
 
@@ -83,13 +83,11 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 | `BOT_STATUS` | text shown in the “Listening to …” status |
 | `IDLE_DISCONNECT_SECONDS` | leave voice after this many idle seconds (`0` = never) |
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
-| `COOKIES_FILE` | `/app/data/cookies.txt` (from Chromium dump) |
-| `COOKIES_FROM_BROWSER` | default Chromium profile path inside the bot container |
-| `COOKIES_REFRESH` | `1` = force cookie dump once (after robots.txt export); keep `0` otherwise |
-| `YOUTUBE_POT_BASE_URL` | PO token HTTP service (default `http://127.0.0.1:4416`) |
-| `CHROMIUM_BIND` | address for Chromium UI (default `127.0.0.1` = VNC/localhost only) |
-| `CHROMIUM_HTTP_PORT` / `CHROMIUM_HTTPS_PORT` | Chromium web UI ports (default `3000` / `3001`) |
-| `CHROMIUM_USER` / `CHROMIUM_PASSWORD` | optional basic auth for the Chromium UI |
+| `COOKIES_FILE` | optional Netscape cookies (only if anon path fails) |
+| `COOKIES_FROM_BROWSER` | optional; enables dump from Chromium profile |
+| `COOKIES_REFRESH` | `1` = force cookie dump once |
+| `YOUTUBE_POT_BASE_URL` | optional PO token HTTP service |
+| `CHROMIUM_*` | only with `docker compose --profile cookies` |
 | `SKIP_YTDLP_UPDATE` | `1` = do not update yt-dlp on container start |
 
 ### GitHub Secrets
@@ -98,20 +96,15 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 2. Add `DISCORD_TOKEN` (required) and optionally `COMMAND_GUILD_ID`.
 3. Register a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners) on the machine that should run Docker, then push to `main` or run **Deploy** manually.
 
-### YouTube cookies (stack Chromium)
+### Optional YouTube cookies
 
-YouTube **rotates** cookies while a normal YouTube tab is open. Dumping from a live session often yields *“cookies are no longer valid”* and bot-check. Follow the [yt-dlp robots.txt export](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) flow:
+Only needed if your host IP still gets *Sign in to confirm you’re not a bot* after the default mpv+ytdl / anon path. Follow the [yt-dlp robots.txt export](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) flow:
 
-1. Deploy the stack (`chromium` + `pot-provider` + `beethovenly`). Confirm `beethovenly-pot` is running.
-2. VNC into the host → open `http://127.0.0.1:3000`.
-3. Log into YouTube (throwaway account recommended).
-4. **In the same tab** go to `https://www.youtube.com/robots.txt` and leave **only that tab** open (do not open youtube.com again).
-5. In stack env set `COOKIES_REFRESH=1`, restart **only** `beethovenly`, then set `COOKIES_REFRESH` back to `0`.
-6. Logs should show cookies saved **without** “no longer valid”, and `LOGIN_INFO` present. After that, leave Chromium on `robots.txt` (or closed tabs) — opening YouTube again rotates cookies.
-
-`COOKIES_REFRESH` defaults to `0` so restarts do not overwrite a good `cookies.txt` with rotated garbage.
-
-**Fallback (host browser / cron):** `scripts/refresh-youtube-cookies.sh` can still write into the stack data volume if you prefer not to use the sidecar.
+1. `docker compose --profile cookies up -d`
+2. VNC → `http://127.0.0.1:3000` → log into YouTube
+3. Same tab → `https://www.youtube.com/robots.txt` (leave **only** that tab)
+4. Set `COOKIES_FROM_BROWSER=chromium+basictext:/chrome-profile/.config/chromium`, `COOKIES_FILE=/app/data/cookies.txt`, `COOKIES_REFRESH=1`, restart `beethovenly`, then set `COOKIES_REFRESH=0`
+5. Incomplete cookie dumps are **ignored** so they don’t make bot-check worse
 
 ## No audio?
 
@@ -123,7 +116,7 @@ If the bot shows an offline panel and logs `WebSocket closed with 4006`, update 
 .venv/bin/python -m pip install -U 'discord.py[voice]==2.7.1'
 ```
 
-If tracks skip immediately, check logs for YouTube bot-checks and refresh `COOKIES_FILE`.
+If tracks skip immediately, check logs for `mpv:` / `yt-dlp:` lines. On harsh datacenter IPs, try the optional cookies profile above.
 
 ## Commands
 
@@ -134,12 +127,13 @@ Most controls are on the panel — slash commands are a fallback.
 ## How playback works
 
 ```
-/play  →  yt-dlp (metadata)
-       →  yt-dlp -o - | mpv -   (stream + decode to PCM s16le 48 kHz stereo)
+/play  →  yt-dlp (metadata only)
+       →  mpv + ytdl  (Wagner-style: open URL directly → PCM)
+       →  fallback: yt-dlp -o - | mpv -   (anon clients, then optional cookies)
        →  discord.py sends frames to Voice
 ```
 
-There is no ffmpeg in the playback pipeline. `yt-dlp` is updated on container start because YouTube breaks often. The image includes **Deno** and `yt-dlp[default]` (EJS). Compose also runs **bgutil pot-provider** on `127.0.0.1:4416` so server IPs can pass YouTube bot checks when cookies alone are not enough.
+`yt-dlp` is still updated on container start because extractors break often. Deno / EJS / pot-provider help the **fallback** cookie/web path; they are not required for the primary mpv+ytdl path.
 
 ## Tests
 

@@ -8,8 +8,7 @@ from bot.config import settings
 
 log = logging.getLogger("beethovenly.youtube")
 
-# Cookies + android_vr → "The page needs to be reloaded".
-# With cookies use web/mweb + Deno/EJS + PO token provider.
+# Prefer anon clients (Wagner-style — no login). Cookies only when session looks real.
 _PLAYER_CLIENTS_WITH_COOKIES = ["mweb", "tv", "web_safari", "web"]
 _PLAYER_CLIENTS_ANON = ["android_vr", "tv", "web_safari"]
 
@@ -20,12 +19,34 @@ def has_youtube_cookies() -> bool:
     return bool(settings.cookies_file or settings.cookies_from_browser)
 
 
+def cookies_look_usable() -> bool:
+    """True only when a cookies file exists and looks like a logged-in YouTube session.
+
+    Invalid/empty cookie dumps make yt-dlp *worse* than anonymous clients, so we
+    treat cookies as opt-in enhancement — same idea as WagnerBot (no cookies).
+    """
+    path = settings.cookies_file
+    if not path or not os.path.isfile(path):
+        # Live browser dump is optional and often rotates; only use when explicitly alone.
+        return bool(settings.cookies_from_browser and not settings.cookies_file)
+    try:
+        raw = open(path, encoding="utf-8", errors="replace").read().lower()
+    except OSError:
+        return False
+    if "youtube.com" not in raw:
+        return False
+    return "login_info" in raw or "__secure-1psid" in raw or "sapisid" in raw
+
+
 def pot_provider_base_url() -> str:
     return (os.getenv("YOUTUBE_POT_BASE_URL") or DEFAULT_POT_URL).strip().rstrip("/")
 
 
 def youtube_player_clients(*, cookies: bool | None = None) -> list[str]:
-    use_cookies = has_youtube_cookies() if cookies is None else cookies
+    if cookies is None:
+        use_cookies = cookies_look_usable()
+    else:
+        use_cookies = cookies
     if use_cookies:
         return list(_PLAYER_CLIENTS_WITH_COOKIES)
     return list(_PLAYER_CLIENTS_ANON)
@@ -34,12 +55,20 @@ def youtube_player_clients(*, cookies: bool | None = None) -> list[str]:
 def ytdlp_extractor_args_cli(*, player_clients: str | None = None, cookies: bool | None = None) -> list[str]:
     """Return ``[--extractor-args, ..., --extractor-args, ...]`` for yt-dlp CLI."""
     clients = player_clients or ",".join(youtube_player_clients(cookies=cookies))
-    return [
+    args = [
         "--extractor-args",
         f"youtube:player_client={clients}",
-        "--extractor-args",
-        f"youtubepot-bgutilhttp:base_url={pot_provider_base_url()}",
     ]
+    # POT plugin is harmless if the HTTP sidecar is down; skip when unused.
+    pot = pot_provider_base_url()
+    if pot:
+        args.extend(
+            [
+                "--extractor-args",
+                f"youtubepot-bgutilhttp:base_url={pot}",
+            ]
+        )
+    return args
 
 
 def ytdlp_js_opts() -> dict[str, Any]:
@@ -50,12 +79,16 @@ def ytdlp_js_opts() -> dict[str, Any]:
     }
 
 
-def apply_youtube_opts(opts: dict[str, Any]) -> dict[str, Any]:
+def apply_youtube_opts(opts: dict[str, Any], *, force_cookies: bool | None = None) -> dict[str, Any]:
+    use_cookies = cookies_look_usable() if force_cookies is None else force_cookies
     opts.update(ytdlp_js_opts())
-    opts["extractor_args"] = {
-        "youtube": {"player_client": youtube_player_clients()},
-        "youtubepot-bgutilhttp": {"base_url": [pot_provider_base_url()]},
+    extractor_args: dict[str, Any] = {
+        "youtube": {"player_client": youtube_player_clients(cookies=use_cookies)},
     }
+    pot = pot_provider_base_url()
+    if pot:
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [pot]}
+    opts["extractor_args"] = extractor_args
     return opts
 
 
@@ -72,14 +105,14 @@ def log_youtube_runtime_status() -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("Deno found but failed to run: %s", exc)
     else:
-        log.warning("Deno missing — YouTube EJS challenges will fail")
+        log.info("Deno missing — only needed for cookie/web YouTube clients")
 
     try:
         import yt_dlp_ejs  # type: ignore
 
         log.info("yt-dlp-ejs: %s", getattr(yt_dlp_ejs, "__version__", "ok"))
     except ImportError:
-        log.warning("yt-dlp-ejs not installed — pip install 'yt-dlp[default]'")
+        log.info("yt-dlp-ejs not installed — optional (pip install 'yt-dlp[default]')")
 
     try:
         from importlib.metadata import version
@@ -91,9 +124,9 @@ def log_youtube_runtime_status() -> None:
             pot_provider_base_url(),
         )
     except Exception:  # noqa: BLE001
-        log.warning("bgutil-ytdlp-pot-provider not installed — bot-check more likely on server IPs")
+        log.info("bgutil-ytdlp-pot-provider not installed — optional fallback")
 
-    # Probe POT HTTP sidecar (compose service, bound to localhost).
+    # Probe POT HTTP sidecar (optional compose service).
     try:
         import urllib.request
 
@@ -101,23 +134,17 @@ def log_youtube_runtime_status() -> None:
         with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310
             log.info("PO token HTTP OK: %s → %s", url, resp.status)
     except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "PO token HTTP unreachable (%s): %s — start beethovenly-pot / check YOUTUBE_POT_BASE_URL",
+        log.info(
+            "PO token HTTP not running (%s): %s — fine for mpv+ytdl / anon path",
             pot_provider_base_url(),
             exc,
         )
 
-    if settings.cookies_file and os.path.isfile(settings.cookies_file):
-        try:
-            raw = open(settings.cookies_file, encoding="utf-8", errors="replace").read().lower()
-        except OSError:
-            return
-        markers = ("login_info", "__secure-1psid", "sapisid", "sid")
-        present = [m for m in markers if m in raw]
-        missing = [m for m in markers if m not in present]
-        log.info("cookie markers present=%s missing=%s", present or "none", missing or "none")
-        if "login_info" not in present:
-            log.warning(
-                "cookies missing LOGIN_INFO — in Chromium open ONLY "
-                "https://www.youtube.com/robots.txt after login, then COOKIES_REFRESH=1 + restart"
-            )
+    if cookies_look_usable():
+        log.info("YouTube cookies: usable (optional enhancement enabled)")
+    elif settings.cookies_file and os.path.isfile(settings.cookies_file):
+        log.info(
+            "YouTube cookies file present but session incomplete — ignoring (anon / mpv+ytdl first)"
+        )
+    else:
+        log.info("YouTube cookies: off — playing via mpv+ytdl / anon clients (Wagner-style)")

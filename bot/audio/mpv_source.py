@@ -10,7 +10,7 @@ from typing import IO
 
 import discord
 
-from bot.audio.youtube_opts import ytdlp_extractor_args_cli
+from bot.audio.youtube_opts import cookies_look_usable, ytdlp_extractor_args_cli
 from bot.config import settings
 
 log = logging.getLogger("beethovenly.mpv")
@@ -21,24 +21,27 @@ FRAME_SIZE = 3840  # 20 ms * 48000 Hz * 2 ch * 2 B
 @dataclass(frozen=True)
 class _StreamStrategy:
     name: str
-    clients: str
-    use_cookies: bool
+    mode: str  # "mpv_ytdl" | "ytdlp_pipe"
+    clients: str = ""
+    use_cookies: bool = False
 
 
-# Order: cookies+web (needs PO/EJS) → anon android_vr → cookies+android_vr last resort.
+# Wagner-style mpv+ytdl first (no cookies). yt-dlp pipe: anon before cookies.
 _STRATEGIES: tuple[_StreamStrategy, ...] = (
-    _StreamStrategy("cookies+mweb", "mweb,tv,web_safari,web", True),
-    _StreamStrategy("cookies+tv", "tv,tv_simply,mweb", True),
-    _StreamStrategy("anon+android_vr", "android_vr,tv,web_safari", False),
-    _StreamStrategy("cookies+android_vr", "android_vr", True),
+    _StreamStrategy("mpv+ytdl", "mpv_ytdl"),
+    _StreamStrategy("anon+android_vr", "ytdlp_pipe", "android_vr,tv,web_safari", False),
+    _StreamStrategy("anon+tv", "ytdlp_pipe", "tv,tv_simply,web_safari", False),
+    _StreamStrategy("cookies+mweb", "ytdlp_pipe", "mweb,tv,web_safari,web", True),
+    _StreamStrategy("cookies+tv", "ytdlp_pipe", "tv,tv_simply,mweb", True),
+    _StreamStrategy("cookies+android_vr", "ytdlp_pipe", "android_vr", True),
 )
 
 
 class MPVPCMSource(discord.AudioSource):
-    """Stream with ``yt-dlp -o - URL | mpv -`` into PCM for Discord voice.
+    """Decode URL audio to PCM for Discord voice.
 
-    Uses the Python yt-dlp (cookies + updates) and pipes media into mpv for
-    decode — same idea as the yt-dlp FAQ stdout streaming example.
+    Primary path matches WagnerBot: ``mpv`` opens the URL with built-in ytdl.
+    Fallback: ``yt-dlp -o - URL | mpv -`` (anon clients first; cookies optional).
     """
 
     def __init__(self, url: str) -> None:
@@ -52,6 +55,17 @@ class MPVPCMSource(discord.AudioSource):
         self.failed = False
         self.fail_reason = ""
         self._strategy: _StreamStrategy | None = None
+
+    def _cookies_available(self) -> bool:
+        return cookies_look_usable()
+
+    def _available_strategies(self) -> list[_StreamStrategy]:
+        out: list[_StreamStrategy] = []
+        for s in _STRATEGIES:
+            if s.use_cookies and not self._cookies_available():
+                continue
+            out.append(s)
+        return out
 
     def _ytdlp_common(self, strategy: _StreamStrategy) -> list[str]:
         cmd = [
@@ -75,10 +89,7 @@ class MPVPCMSource(discord.AudioSource):
         return cmd
 
     def _ytdlp_command(self, strategy: _StreamStrategy | None = None) -> list[str]:
-        strategy = strategy or self._strategy or _STRATEGIES[0]
-        cmd = self._ytdlp_common(strategy)
-        # Insert stream flags after module name args: quiet + stdout.
-        # Rebuild cleanly for streaming.
+        strategy = strategy or self._strategy or _STRATEGIES[1]
         cmd = [
             sys.executable,
             "-m",
@@ -104,16 +115,87 @@ class MPVPCMSource(discord.AudioSource):
         cmd.extend(["--", self.url])
         return cmd
 
-    def _pick_strategy(self) -> _StreamStrategy:
-        """Probe with ``yt-dlp -g`` until one strategy yields a media URL."""
-        available = [
-            s
-            for s in _STRATEGIES
-            if (not s.use_cookies) or settings.cookies_file or settings.cookies_from_browser
+    def _mpv_pcm_base(self) -> list[str]:
+        return [
+            "mpv",
+            "--no-config",
+            "--no-video",
+            "--vo=null",
+            "--no-terminal",
+            "--really-quiet",
+            "--idle=no",
+            "--force-window=no",
+            "--gapless-audio=no",
+            "--audio-display=no",
+            "--load-scripts=no",
+            "--ao=pcm",
+            "--ao-pcm-waveheader=no",
+            "--ao-pcm-file=/dev/stdout",
+            "--audio-format=s16",
+            "--audio-channels=stereo",
+            "--audio-samplerate=48000",
+            "--audio-fallback-to-null=no",
+            "--cache=yes",
+            "--demuxer-max-bytes=64MiB",
+            "--network-timeout=30",
         ]
 
+    def _mpv_command(self, *, from_stdin: bool = True) -> list[str]:
+        """Pipe mode (stdin) keeps ``--ytdl=no``; direct mode uses mpv ytdl like Wagner."""
+        cmd = self._mpv_pcm_base()
+        if from_stdin:
+            cmd.append("--ytdl=no")
+            cmd.append("-")
+        else:
+            # Prefer system yt-dlp (same as Wagner's host mpv) when available.
+            cmd.extend(["--ytdl=yes", "--ytdl-format=bestaudio/best", "--", self.url])
+        return cmd
+
+    def _probe_mpv_ytdl(self) -> bool:
+        """Quick check that mpv can resolve the URL via ytdl (no full decode)."""
+        cmd = [
+            "mpv",
+            "--no-config",
+            "--no-video",
+            "--vo=null",
+            "--ao=null",
+            "--no-terminal",
+            "--really-quiet",
+            "--frames=0",
+            "--ytdl=yes",
+            "--ytdl-format=bestaudio/best",
+            "--",
+            self.url,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            log.warning("mpv+ytdl probe failed: %s", exc)
+            return False
+        if proc.returncode == 0:
+            return True
+        err = (proc.stderr or proc.stdout or "").strip().splitlines()
+        brief = err[-1] if err else f"exit {proc.returncode}"
+        log.warning("mpv+ytdl probe failed: %s", brief)
+        return False
+
+    def _pick_strategy(self) -> _StreamStrategy:
+        """Probe strategies until one can resolve a media URL."""
         errors: list[str] = []
-        for strategy in available:
+        for strategy in self._available_strategies():
+            if strategy.mode == "mpv_ytdl":
+                if self._probe_mpv_ytdl():
+                    log.info("stream strategy ok: %s", strategy.name)
+                    return strategy
+                errors.append(f"{strategy.name}: probe failed")
+                continue
+
             cmd = [
                 *self._ytdlp_common(strategy),
                 "-g",
@@ -139,40 +221,13 @@ class MPVPCMSource(discord.AudioSource):
             errors.append(f"{strategy.name}: {brief}")
             log.warning("yt-dlp strategy failed (%s): %s", strategy.name, brief)
 
-        raise RuntimeError("all yt-dlp strategies failed:\n" + "\n".join(errors))
-
-    def _mpv_command(self) -> list[str]:
-        return [
-            "mpv",
-            "--no-config",
-            "--no-video",
-            "--vo=null",
-            "--no-terminal",
-            "--really-quiet",
-            "--idle=no",
-            "--force-window=no",
-            "--gapless-audio=no",
-            "--audio-display=no",
-            "--load-scripts=no",
-            "--ytdl=no",
-            "--ao=pcm",
-            "--ao-pcm-waveheader=no",
-            "--ao-pcm-file=/dev/stdout",
-            "--audio-format=s16",
-            "--audio-channels=stereo",
-            "--audio-samplerate=48000",
-            "--audio-fallback-to-null=no",
-            "--cache=yes",
-            "--demuxer-max-bytes=64MiB",
-            "--network-timeout=30",
-            "-",  # read media stream from stdin
-        ]
+        raise RuntimeError("all stream strategies failed:\n" + "\n".join(errors))
 
     def _ensure_started(self) -> None:
         if self._started:
             return
         self._started = True
-        log.info("yt-dlp | mpv pipe start: %s", self.url)
+        log.info("stream start: %s", self.url)
         try:
             self._strategy = self._pick_strategy()
         except RuntimeError as exc:
@@ -181,6 +236,25 @@ class MPVPCMSource(discord.AudioSource):
             log.warning("%s", exc)
             raise
 
+        if self._strategy.mode == "mpv_ytdl":
+            self._start_mpv_direct()
+        else:
+            self._start_ytdlp_pipe()
+
+    def _start_mpv_direct(self) -> None:
+        log.info("mpv+ytdl (Wagner-style) start: %s", self.url)
+        self.proc = subprocess.Popen(
+            self._mpv_command(from_stdin=False),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        self._stderr_thread = threading.Thread(target=self._drain_mpv_stderr, daemon=True)
+        self._stderr_thread.start()
+
+    def _start_ytdlp_pipe(self) -> None:
+        log.info("yt-dlp | mpv pipe start (%s): %s", self._strategy.name if self._strategy else "?", self.url)
         self._ytdlp = subprocess.Popen(
             self._ytdlp_command(self._strategy),
             stdout=subprocess.PIPE,
@@ -190,7 +264,7 @@ class MPVPCMSource(discord.AudioSource):
         )
         assert self._ytdlp.stdout is not None
         self.proc = subprocess.Popen(
-            self._mpv_command(),
+            self._mpv_command(from_stdin=True),
             stdin=self._ytdlp.stdout,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
