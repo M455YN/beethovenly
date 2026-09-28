@@ -38,9 +38,8 @@ class Settings:
         cookies_raw = os.getenv("COOKIES_FILE", "").strip() or None
         cookies: str | None = cookies_raw
         if cookies_raw and not os.path.isfile(cookies_raw):
-            log.warning(
-                "COOKIES_FILE is set to %r but the file is missing or unreadable — "
-                "YouTube may block extraction. Mount cookies at that path inside the container.",
+            log.info(
+                "COOKIES_FILE=%r missing — playing without cookies (mpv+ytdl / anon).",
                 cookies_raw,
             )
             cookies = None
@@ -51,7 +50,7 @@ class Settings:
             try:
                 browser_tuple = parse_cookies_from_browser(browser_raw)
             except ValueError as exc:
-                log.warning("%s — ignoring COOKIES_FROM_BROWSER", exc)
+                log.info("%s — ignoring COOKIES_FROM_BROWSER", exc)
                 browser_raw = None
 
         return cls(

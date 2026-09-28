@@ -10,7 +10,7 @@ fi
 if command -v deno >/dev/null 2>&1; then
   echo "Deno JS runtime: $(deno --version | head -n 1)"
 else
-  echo "WARN: brak deno w PATH — YouTube z cookies może padać (The page needs to be reloaded)."
+  echo "INFO: brak deno — OK dla mpv+ytdl / anon; potrzebny tylko przy cookies/web clients."
 fi
 
 COOKIES_OUT="${COOKIES_FILE:-/app/data/cookies.txt}"
@@ -53,14 +53,12 @@ cookies_look_logged_in() {
   grep -qiE '(^|\t)LOGIN_INFO($|\t)|__Secure-1PSID' "$f"
 }
 
-# YouTube rotates cookies on open youtube.com tabs. Dumping from a live Chromium
-# session often yields INVALID cookies. Only refresh when forced or missing.
-# Correct one-shot flow (yt-dlp wiki):
-#   1) VNC → http://127.0.0.1:3000
-#   2) Log into YouTube
-#   3) SAME tab → https://www.youtube.com/robots.txt  (leave only this tab)
-#   4) Set COOKIES_REFRESH=1, restart beethovenly once
-#   5) Do NOT open YouTube again in that Chromium profile
+# Optional cookie dump — only when COOKIES_FROM_BROWSER is explicitly set.
+# Default compose leaves it empty so playback uses mpv+ytdl / anon (Wagner-style).
+# Correct one-shot flow (yt-dlp wiki) when you DO need cookies:
+#   1) docker compose --profile cookies up -d
+#   2) VNC → http://127.0.0.1:3000 → YouTube login → robots.txt only
+#   3) Set COOKIES_FROM_BROWSER + COOKIES_REFRESH=1, restart beethovenly once
 if [ -n "${COOKIES_FROM_BROWSER:-}" ]; then
   mkdir -p "$(dirname "$COOKIES_OUT")"
   profile="$(find_chromium_profile /chrome-profile || true)"
@@ -75,13 +73,13 @@ if [ -n "${COOKIES_FROM_BROWSER:-}" ]; then
     need_refresh=1
     echo "Cookies bez sesji logowania — dump z Chromium."
   else
-    echo "Zostawiam istniejące cookies ($COOKIES_OUT). Ustaw COOKIES_REFRESH=1 po eksporcie z robots.txt."
+    echo "Zostawiam istniejące cookies ($COOKIES_OUT)."
   fi
 
   if [ "$need_refresh" -eq 1 ]; then
     if [ -z "$profile" ]; then
       echo "WARN: brak profilu Chromium pod /chrome-profile."
-      echo "      Po VNC: http://127.0.0.1:3000 → YouTube login → robots.txt → COOKIES_REFRESH=1 + restart."
+      echo "      docker compose --profile cookies up -d → login → robots.txt → COOKIES_REFRESH=1."
     else
       export COOKIES_FROM_BROWSER="chromium+basictext:${profile}"
       tmp="${COOKIES_OUT}.new"
@@ -93,27 +91,28 @@ if [ -n "${COOKIES_FROM_BROWSER:-}" ]; then
       rc=$?
       set -e
       if [ "$rc" -ne 0 ] || [ ! -f "$tmp" ]; then
-        echo "WARN: dump nieudany (rc=$rc)."
+        echo "WARN: dump nieudany (rc=$rc) — jadę bez cookies."
         tail -n 20 "$log" 2>/dev/null || true
         rm -f "$tmp"
       elif grep -qi 'no longer valid\|cookies are no longer valid' "$log"; then
-        echo "WARN: yt-dlp mówi, że cookies z przeglądarki są NIEWAŻNE (rotacja)."
-        echo "      W Chromium: zaloguj → https://www.youtube.com/robots.txt (jedyna karta),"
-        echo "      NIE otwieraj z powrotem youtube.com, ustaw COOKIES_REFRESH=1 i zrestartuj bota."
+        echo "WARN: cookies z przeglądarki nieważne — jadę bez cookies."
         tail -n 5 "$log" || true
         rm -f "$tmp"
       else
         mv "$tmp" "$COOKIES_OUT"
         yt_n="$(grep -ci 'youtube\.com' "$COOKIES_OUT" 2>/dev/null || echo 0)"
         echo "Cookies zapisane ($yt_n youtube.com rows)."
-        if ! cookies_look_logged_in "$COOKIES_OUT"; then
-          echo "WARN: dump bez LOGIN_INFO / __Secure-1PSID — sesja nie wygląda na zalogowaną."
-        fi
+        export COOKIES_FILE="$COOKIES_OUT"
       fi
       rm -f "$log"
     fi
+  else
+    export COOKIES_FILE="$COOKIES_OUT"
   fi
-  export COOKIES_FILE="$COOKIES_OUT"
+elif [ -n "${COOKIES_FILE:-}" ] && [ -f "${COOKIES_FILE}" ]; then
+  echo "Używam COOKIES_FILE=${COOKIES_FILE} (opcjonalny fallback)."
+else
+  echo "Cookies wyłączone — odtwarzanie jak Wagner (mpv+ytdl / anon yt-dlp)."
 fi
 
 exec python -m bot
