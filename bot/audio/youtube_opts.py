@@ -151,3 +151,7 @@ def log_youtube_runtime_status() -> None:
         )
     else:
         log.info("YouTube cookies: off — using pot-provider / anon clients")
+    if settings.ytdlp_proxy:
+        # Don't log credentials if present in the URL.
+        safe = settings.ytdlp_proxy.split("@")[-1] if "@" in settings.ytdlp_proxy else settings.ytdlp_proxy
+        log.info("yt-dlp proxy: …@%s" if "@" in settings.ytdlp_proxy else "yt-dlp proxy: %s", safe)

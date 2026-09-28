@@ -3,6 +3,16 @@ from types import SimpleNamespace
 from bot.audio.mpv_source import FRAME_SIZE, MPVPCMSource, _STRATEGIES
 
 
+def _settings(**kwargs: object) -> SimpleNamespace:
+    base = {
+        "cookies_file": None,
+        "cookies_from_browser": None,
+        "ytdlp_proxy": None,
+    }
+    base.update(kwargs)
+    return SimpleNamespace(**base)
+
+
 def test_frame_size_is_20ms_pcm() -> None:
     assert FRAME_SIZE == 3840
 
@@ -13,7 +23,8 @@ def test_strategies_prefer_anon_web_safari() -> None:
     assert not any(s.name == "cookies+android_vr" for s in _STRATEGIES)
 
 
-def test_mpv_command_plays_resolved_url() -> None:
+def test_mpv_command_plays_resolved_url(monkeypatch) -> None:
+    monkeypatch.setattr("bot.audio.mpv_source.settings", _settings())
     src = MPVPCMSource("https://www.youtube.com/watch?v=dQw4w9wgGcQ")
     media = "https://googlevideo.com/videoplayback?id=1"
     cmd = src._mpv_command(media)
@@ -21,16 +32,28 @@ def test_mpv_command_plays_resolved_url() -> None:
     assert "--ao=pcm" in cmd
     assert "--ytdl=no" in cmd
     assert cmd[-1] == media
+    assert not any(a.startswith("--http-proxy=") for a in cmd)
+
+
+def test_mpv_command_uses_proxy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "bot.audio.mpv_source.settings",
+        _settings(ytdlp_proxy="http://user:pass@proxy.example:8080"),
+    )
+    src = MPVPCMSource("https://www.youtube.com/watch?v=dQw4w9wgGcQ")
+    cmd = src._mpv_command("https://googlevideo.com/x")
+    assert "--http-proxy=http://user:pass@proxy.example:8080" in cmd
+    assert "--https-proxy=http://user:pass@proxy.example:8080" in cmd
 
 
 def test_ytdlp_base_with_cookies(monkeypatch) -> None:
     monkeypatch.setattr(
         "bot.audio.mpv_source.settings",
-        SimpleNamespace(cookies_file="/app/data/cookies.txt", cookies_from_browser=None),
+        _settings(cookies_file="/app/data/cookies.txt"),
     )
     monkeypatch.setattr(
         "bot.audio.youtube_opts.settings",
-        SimpleNamespace(cookies_file="/app/data/cookies.txt", cookies_from_browser=None),
+        _settings(cookies_file="/app/data/cookies.txt"),
     )
     from bot.audio.mpv_source import _StreamStrategy
 
@@ -46,7 +69,7 @@ def test_ytdlp_base_with_cookies(monkeypatch) -> None:
 def test_ytdlp_base_anon_omits_cookies(monkeypatch) -> None:
     monkeypatch.setattr(
         "bot.audio.mpv_source.settings",
-        SimpleNamespace(cookies_file="/app/data/cookies.txt", cookies_from_browser=None),
+        _settings(cookies_file="/app/data/cookies.txt"),
     )
     from bot.audio.mpv_source import _StreamStrategy
 
@@ -55,6 +78,20 @@ def test_ytdlp_base_anon_omits_cookies(monkeypatch) -> None:
     cmd = src._ytdlp_base(strategy)
     assert "--cookies" not in cmd
     assert any("android_vr" in a for a in cmd)
+
+
+def test_ytdlp_base_passes_proxy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "bot.audio.mpv_source.settings",
+        _settings(ytdlp_proxy="http://user:pass@proxy.example:8080"),
+    )
+    from bot.audio.mpv_source import _StreamStrategy
+
+    src = MPVPCMSource("https://www.youtube.com/watch?v=dQw4w9wgGcQ")
+    strategy = _StreamStrategy("anon+web_safari", "web_safari", False)
+    cmd = src._ytdlp_base(strategy)
+    assert "--proxy" in cmd
+    assert cmd[cmd.index("--proxy") + 1] == "http://user:pass@proxy.example:8080"
 
 
 def test_available_strategies_skip_cookies_when_disabled(monkeypatch) -> None:

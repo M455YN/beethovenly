@@ -59,6 +59,8 @@ services:
       COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-}
       COOKIES_REFRESH: ${COOKIES_REFRESH:-0}
       YOUTUBE_POT_BASE_URL: ${YOUTUBE_POT_BASE_URL:-http://127.0.0.1:4416}
+      # Residential/HTTP proxy for yt-dlp (OVH/datacenter IPs get YouTube bot-check).
+      YTDLP_PROXY: ${YTDLP_PROXY:-}
       SKIP_YTDLP_UPDATE: ${SKIP_YTDLP_UPDATE:-}
     volumes:
       - ./data:/app/data

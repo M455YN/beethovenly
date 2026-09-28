@@ -30,6 +30,7 @@ class Settings:
     cookies_file: str | None
     cookies_from_browser: str | None
     cookies_from_browser_tuple: tuple[str, str | None, str | None, str | None] | None
+    ytdlp_proxy: str | None
 
     @classmethod
     def load(cls) -> Settings:
@@ -39,7 +40,7 @@ class Settings:
         cookies: str | None = cookies_raw
         if cookies_raw and not os.path.isfile(cookies_raw):
             log.info(
-                "COOKIES_FILE=%r missing — playing without cookies (mpv+ytdl / anon).",
+                "COOKIES_FILE=%r missing — playing without cookies (anon + pot).",
                 cookies_raw,
             )
             cookies = None
@@ -53,6 +54,13 @@ class Settings:
                 log.info("%s — ignoring COOKIES_FROM_BROWSER", exc)
                 browser_raw = None
 
+        proxy = (
+            os.getenv("YTDLP_PROXY", "").strip()
+            or os.getenv("HTTPS_PROXY", "").strip()
+            or os.getenv("HTTP_PROXY", "").strip()
+            or None
+        )
+
         return cls(
             token=token,
             command_guild_id=int(guild_raw) if guild_raw else None,
@@ -62,6 +70,7 @@ class Settings:
             cookies_file=cookies,
             cookies_from_browser=browser_raw,
             cookies_from_browser_tuple=browser_tuple,
+            ytdlp_proxy=proxy,
         )
 
 

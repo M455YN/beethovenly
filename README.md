@@ -84,12 +84,21 @@ Use **GitHub Actions secrets** (same names) for deploy, or a local `.env` for ma
 | `IDLE_DISCONNECT_SECONDS` | leave voice after this many idle seconds (`0` = never) |
 | `PLAYLIST_LIMIT` | max tracks from a playlist (1–200) |
 | `YOUTUBE_POT_BASE_URL` | PO token HTTP service (default `http://127.0.0.1:4416`) — **keep pot-provider running** |
+| `YTDLP_PROXY` | HTTP(S) proxy for yt-dlp (needed on many OVH/VPS IPs) |
 | `YOUTUBE_USE_COOKIES` | `1` = allow cookies strategies (default `0`) |
 | `COOKIES_FILE` | optional Netscape cookies (only if `YOUTUBE_USE_COOKIES=1`) |
 | `COOKIES_FROM_BROWSER` | optional; enables dump from Chromium profile |
 | `COOKIES_REFRESH` | `1` = force cookie dump once |
 | `CHROMIUM_*` | only with `docker compose --profile cookies` |
 | `SKIP_YTDLP_UPDATE` | `1` = do not update yt-dlp on container start |
+
+### Datacenter / OVH bot-check
+
+YouTube often returns *Sign in to confirm you’re not a bot* on hosting IPs (e.g. OVH `145.239.*`). WagnerBot on a home PC skips that. On a VPS pick one:
+
+1. **`YTDLP_PROXY`** — residential HTTP(S) proxy (most reliable)
+2. **Fresh cookies from a home browser** (not logged in on the VPS) → `data/cookies.txt` + `YOUTUBE_USE_COOKIES=1`
+3. pot-provider alone may still not be enough on flagged ASN ranges
 
 ### GitHub Secrets
 

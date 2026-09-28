@@ -49,6 +49,8 @@ def _opts(*, search: bool = False, playlist: bool = True) -> dict[str, Any]:
         opts["cookiefile"] = settings.cookies_file
     elif use_cookies and settings.cookies_from_browser_tuple:
         opts["cookiesfrombrowser"] = settings.cookies_from_browser_tuple
+    if settings.ytdlp_proxy:
+        opts["proxy"] = settings.ytdlp_proxy
     if search:
         opts["default_search"] = "ytsearch"
         opts["noplaylist"] = True

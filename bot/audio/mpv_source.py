@@ -80,6 +80,8 @@ class MPVPCMSource(discord.AudioSource):
             "ejs:github",
             *ytdlp_extractor_args_cli(player_clients=strategy.clients, cookies=strategy.use_cookies),
         ]
+        if settings.ytdlp_proxy:
+            cmd.extend(["--proxy", settings.ytdlp_proxy])
         if strategy.use_cookies and settings.cookies_file:
             cmd.extend(["--cookies", settings.cookies_file])
         elif strategy.use_cookies and settings.cookies_from_browser:
@@ -120,12 +122,14 @@ class MPVPCMSource(discord.AudioSource):
                 return strategy, media
             errors.append(strategy.name)
         raise RuntimeError(
-            "all yt-dlp strategies failed (need pot-provider on :4416; "
-            "cookies only with YOUTUBE_USE_COOKIES=1):\n" + "\n".join(errors)
+            "all yt-dlp strategies failed — OVH/datacenter IPs are often blocked by YouTube. "
+            "Fix: (1) keep pot-provider up, (2) set YTDLP_PROXY to a residential proxy, "
+            "or (3) YOUTUBE_USE_COOKIES=1 with a fresh robots.txt cookie export from a home browser.\n"
+            + "\n".join(errors)
         )
 
     def _mpv_command(self, media_url: str) -> list[str]:
-        return [
+        cmd = [
             "mpv",
             "--no-config",
             "--no-video",
@@ -148,9 +152,13 @@ class MPVPCMSource(discord.AudioSource):
             "--cache=yes",
             "--demuxer-max-bytes=64MiB",
             "--network-timeout=30",
-            "--",
-            media_url,
         ]
+        if settings.ytdlp_proxy:
+            # Same egress as yt-dlp — CDN URLs often fail from OVH without proxy.
+            cmd.append(f"--http-proxy={settings.ytdlp_proxy}")
+            cmd.append(f"--https-proxy={settings.ytdlp_proxy}")
+        cmd.extend(["--", media_url])
+        return cmd
 
     def _ensure_started(self) -> None:
         if self._started:
