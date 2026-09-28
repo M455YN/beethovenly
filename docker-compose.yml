@@ -1,6 +1,19 @@
 services:
-  # Optional: Chromium UI for exporting YouTube cookies when anon/mpv+ytdl is blocked.
-  # Start with: docker compose --profile cookies up -d
+  # PO tokens for yt-dlp — required on most server IPs (YouTube GVS).
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: beethovenly-pot
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4416:4416"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Optional Chromium for cookie export only.
+  # docker compose --profile cookies up -d
   chromium:
     profiles: ["cookies"]
     image: lscr.io/linuxserver/chromium:latest
@@ -25,33 +38,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: PO tokens for yt-dlp when server IPs get YouTube bot-check.
-  pot-provider:
-    profiles: ["cookies"]
-    image: brainicism/bgutil-ytdlp-pot-provider:latest
-    container_name: beethovenly-pot
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:4416:4416"
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
-
   beethovenly:
     build: .
     container_name: beethovenly
     restart: unless-stopped
-    # Discord Voice needs real UDP. Host networking avoids Docker NAT issues on Linux.
+    # Discord Voice needs real UDP. Host networking reaches pot on 127.0.0.1:4416.
     network_mode: host
+    depends_on:
+      - pot-provider
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       COMMAND_GUILD_ID: ${COMMAND_GUILD_ID:-}
       BOT_STATUS: ${BOT_STATUS:-/play • beethovenly}
       IDLE_DISCONNECT_SECONDS: ${IDLE_DISCONNECT_SECONDS:-300}
       PLAYLIST_LIMIT: ${PLAYLIST_LIMIT:-50}
-      # Cookies are optional — leave unset for Wagner-style mpv+ytdl / anon playback.
+      # Cookies OFF by default — bad dumps cause "Sign in to confirm you're not a bot".
+      # Only enable after a valid robots.txt export: YOUTUBE_USE_COOKIES=1
+      YOUTUBE_USE_COOKIES: ${YOUTUBE_USE_COOKIES:-0}
       COOKIES_FILE: ${COOKIES_FILE:-}
       COOKIES_FROM_BROWSER: ${COOKIES_FROM_BROWSER:-}
       COOKIES_REFRESH: ${COOKIES_REFRESH:-0}

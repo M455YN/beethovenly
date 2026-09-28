@@ -17,63 +17,61 @@ log = logging.getLogger("beethovenly.mpv")
 
 FRAME_SIZE = 3840  # 20 ms * 48000 Hz * 2 ch * 2 B
 
+# Prefer HLS (web_safari GVS often needs no PO) then pot-backed clients.
+# Never mix cookies with android_vr — yt-dlp warns / bot-checks.
+_FORMAT = "bestaudio[protocol^=m3u8]/bestaudio/best"
+
 
 @dataclass(frozen=True)
 class _StreamStrategy:
     name: str
-    mode: str  # "mpv_ytdl" | "ytdlp_pipe"
-    clients: str = ""
+    clients: str
     use_cookies: bool = False
 
 
-# Wagner-style mpv+ytdl first (no cookies). yt-dlp pipe: anon before cookies.
 _STRATEGIES: tuple[_StreamStrategy, ...] = (
-    _StreamStrategy("mpv+ytdl", "mpv_ytdl"),
-    _StreamStrategy("anon+android_vr", "ytdlp_pipe", "android_vr,tv,web_safari", False),
-    _StreamStrategy("anon+tv", "ytdlp_pipe", "tv,tv_simply,web_safari", False),
-    _StreamStrategy("cookies+mweb", "ytdlp_pipe", "mweb,tv,web_safari,web", True),
-    _StreamStrategy("cookies+tv", "ytdlp_pipe", "tv,tv_simply,mweb", True),
-    _StreamStrategy("cookies+android_vr", "ytdlp_pipe", "android_vr", True),
+    _StreamStrategy("anon+web_safari", "web_safari"),
+    _StreamStrategy("anon+android_vr", "android_vr,tv"),
+    _StreamStrategy("anon+mweb", "mweb,web_safari"),
+    _StreamStrategy("anon+tv", "tv,tv_simply"),
+    _StreamStrategy("cookies+mweb", "mweb,web_safari,web", True),
+    _StreamStrategy("cookies+tv", "tv,mweb", True),
 )
 
 
 class MPVPCMSource(discord.AudioSource):
-    """Decode URL audio to PCM for Discord voice.
+    """Resolve a direct media URL with yt-dlp, then decode with mpv → PCM.
 
-    Primary path matches WagnerBot: ``mpv`` opens the URL with built-in ytdl.
-    Fallback: ``yt-dlp -o - URL | mpv -`` (anon clients first; cookies optional).
+    Pipe ``yt-dlp -o -`` breaks HLS (m3u8). Instead: ``yt-dlp -g`` then
+    ``mpv --ytdl=no <cdn-url>`` — works with and without PO tokens.
     """
 
     def __init__(self, url: str) -> None:
         self.url = url
         self.proc: subprocess.Popen[bytes] | None = None
-        self._ytdlp: subprocess.Popen[bytes] | None = None
         self._stderr_thread: threading.Thread | None = None
-        self._ytdlp_stderr_thread: threading.Thread | None = None
         self._stderr_tail: list[str] = []
         self._started = False
         self.failed = False
         self.fail_reason = ""
         self._strategy: _StreamStrategy | None = None
-
-    def _cookies_available(self) -> bool:
-        return cookies_look_usable()
+        self._media_url: str | None = None
 
     def _available_strategies(self) -> list[_StreamStrategy]:
         out: list[_StreamStrategy] = []
         for s in _STRATEGIES:
-            if s.use_cookies and not self._cookies_available():
+            if s.use_cookies and not cookies_look_usable():
                 continue
             out.append(s)
         return out
 
-    def _ytdlp_common(self, strategy: _StreamStrategy) -> list[str]:
+    def _ytdlp_base(self, strategy: _StreamStrategy) -> list[str]:
         cmd = [
             sys.executable,
             "-m",
             "yt_dlp",
             "-f",
-            "bestaudio/best",
+            _FORMAT,
             "--no-playlist",
             "--no-progress",
             "--js-runtimes",
@@ -88,34 +86,45 @@ class MPVPCMSource(discord.AudioSource):
             cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
         return cmd
 
-    def _ytdlp_command(self, strategy: _StreamStrategy | None = None) -> list[str]:
-        strategy = strategy or self._strategy or _STRATEGIES[1]
-        cmd = [
-            sys.executable,
-            "-m",
-            "yt_dlp",
-            "-f",
-            "bestaudio/best",
-            "-o",
-            "-",
-            "--quiet",
-            "--no-warnings",
-            "--no-playlist",
-            "--no-progress",
-            "--js-runtimes",
-            "deno",
-            "--remote-components",
-            "ejs:github",
-            *ytdlp_extractor_args_cli(player_clients=strategy.clients, cookies=strategy.use_cookies),
-        ]
-        if strategy.use_cookies and settings.cookies_file:
-            cmd.extend(["--cookies", settings.cookies_file])
-        elif strategy.use_cookies and settings.cookies_from_browser:
-            cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
-        cmd.extend(["--", self.url])
-        return cmd
+    def _resolve_media_url(self, strategy: _StreamStrategy) -> str | None:
+        cmd = [*self._ytdlp_base(strategy), "-g", "--", self.url]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            log.warning("yt-dlp strategy timeout (%s)", strategy.name)
+            return None
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip().splitlines()
+            brief = err[-1] if err else f"exit {proc.returncode}"
+            log.warning("yt-dlp strategy failed (%s): %s", strategy.name, brief)
+            return None
+        lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        if not lines:
+            log.warning("yt-dlp strategy failed (%s): empty -g output", strategy.name)
+            return None
+        # bestaudio should be a single URL; if multiple, take the first (audio).
+        return lines[0]
 
-    def _mpv_pcm_base(self) -> list[str]:
+    def _pick_strategy(self) -> tuple[_StreamStrategy, str]:
+        errors: list[str] = []
+        for strategy in self._available_strategies():
+            media = self._resolve_media_url(strategy)
+            if media:
+                log.info("yt-dlp strategy ok: %s", strategy.name)
+                return strategy, media
+            errors.append(strategy.name)
+        raise RuntimeError(
+            "all yt-dlp strategies failed (need pot-provider on :4416; "
+            "cookies only with YOUTUBE_USE_COOKIES=1):\n" + "\n".join(errors)
+        )
+
+    def _mpv_command(self, media_url: str) -> list[str]:
         return [
             "mpv",
             "--no-config",
@@ -128,6 +137,7 @@ class MPVPCMSource(discord.AudioSource):
             "--gapless-audio=no",
             "--audio-display=no",
             "--load-scripts=no",
+            "--ytdl=no",
             "--ao=pcm",
             "--ao-pcm-waveheader=no",
             "--ao-pcm-file=/dev/stdout",
@@ -138,90 +148,9 @@ class MPVPCMSource(discord.AudioSource):
             "--cache=yes",
             "--demuxer-max-bytes=64MiB",
             "--network-timeout=30",
-        ]
-
-    def _mpv_command(self, *, from_stdin: bool = True) -> list[str]:
-        """Pipe mode (stdin) keeps ``--ytdl=no``; direct mode uses mpv ytdl like Wagner."""
-        cmd = self._mpv_pcm_base()
-        if from_stdin:
-            cmd.append("--ytdl=no")
-            cmd.append("-")
-        else:
-            # Prefer system yt-dlp (same as Wagner's host mpv) when available.
-            cmd.extend(["--ytdl=yes", "--ytdl-format=bestaudio/best", "--", self.url])
-        return cmd
-
-    def _probe_mpv_ytdl(self) -> bool:
-        """Quick check that mpv can resolve the URL via ytdl (no full decode)."""
-        cmd = [
-            "mpv",
-            "--no-config",
-            "--no-video",
-            "--vo=null",
-            "--ao=null",
-            "--no-terminal",
-            "--really-quiet",
-            "--frames=0",
-            "--ytdl=yes",
-            "--ytdl-format=bestaudio/best",
             "--",
-            self.url,
+            media_url,
         ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=90,
-                check=False,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            log.warning("mpv+ytdl probe failed: %s", exc)
-            return False
-        if proc.returncode == 0:
-            return True
-        err = (proc.stderr or proc.stdout or "").strip().splitlines()
-        brief = err[-1] if err else f"exit {proc.returncode}"
-        log.warning("mpv+ytdl probe failed: %s", brief)
-        return False
-
-    def _pick_strategy(self) -> _StreamStrategy:
-        """Probe strategies until one can resolve a media URL."""
-        errors: list[str] = []
-        for strategy in self._available_strategies():
-            if strategy.mode == "mpv_ytdl":
-                if self._probe_mpv_ytdl():
-                    log.info("stream strategy ok: %s", strategy.name)
-                    return strategy
-                errors.append(f"{strategy.name}: probe failed")
-                continue
-
-            cmd = [
-                *self._ytdlp_common(strategy),
-                "-g",
-                "--",
-                self.url,
-            ]
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=90,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired:
-                errors.append(f"{strategy.name}: timeout")
-                continue
-            if proc.returncode == 0 and proc.stdout.strip():
-                log.info("yt-dlp strategy ok: %s", strategy.name)
-                return strategy
-            err = (proc.stderr or proc.stdout or "").strip().splitlines()
-            brief = err[-1] if err else f"exit {proc.returncode}"
-            errors.append(f"{strategy.name}: {brief}")
-            log.warning("yt-dlp strategy failed (%s): %s", strategy.name, brief)
-
-        raise RuntimeError("all stream strategies failed:\n" + "\n".join(errors))
 
     def _ensure_started(self) -> None:
         if self._started:
@@ -229,22 +158,21 @@ class MPVPCMSource(discord.AudioSource):
         self._started = True
         log.info("stream start: %s", self.url)
         try:
-            self._strategy = self._pick_strategy()
+            self._strategy, self._media_url = self._pick_strategy()
         except RuntimeError as exc:
             self.failed = True
             self.fail_reason = str(exc)
             log.warning("%s", exc)
             raise
 
-        if self._strategy.mode == "mpv_ytdl":
-            self._start_mpv_direct()
-        else:
-            self._start_ytdlp_pipe()
-
-    def _start_mpv_direct(self) -> None:
-        log.info("mpv+ytdl (Wagner-style) start: %s", self.url)
+        assert self._media_url is not None
+        log.info(
+            "mpv decode (%s): %s",
+            self._strategy.name if self._strategy else "?",
+            self._media_url[:120],
+        )
         self.proc = subprocess.Popen(
-            self._mpv_command(from_stdin=False),
+            self._mpv_command(self._media_url),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
@@ -252,31 +180,6 @@ class MPVPCMSource(discord.AudioSource):
         )
         self._stderr_thread = threading.Thread(target=self._drain_mpv_stderr, daemon=True)
         self._stderr_thread.start()
-
-    def _start_ytdlp_pipe(self) -> None:
-        log.info("yt-dlp | mpv pipe start (%s): %s", self._strategy.name if self._strategy else "?", self.url)
-        self._ytdlp = subprocess.Popen(
-            self._ytdlp_command(self._strategy),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            bufsize=0,
-        )
-        assert self._ytdlp.stdout is not None
-        self.proc = subprocess.Popen(
-            self._mpv_command(from_stdin=True),
-            stdin=self._ytdlp.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        # Allow yt-dlp to receive SIGPIPE if mpv exits first.
-        self._ytdlp.stdout.close()
-
-        self._stderr_thread = threading.Thread(target=self._drain_mpv_stderr, daemon=True)
-        self._stderr_thread.start()
-        self._ytdlp_stderr_thread = threading.Thread(target=self._drain_ytdlp_stderr, daemon=True)
-        self._ytdlp_stderr_thread.start()
 
     def _note_stderr(self, prefix: str, line: str) -> None:
         self._stderr_tail.append(f"{prefix}{line}")
@@ -298,16 +201,6 @@ class MPVPCMSource(discord.AudioSource):
             if line:
                 self._note_stderr("mpv: ", line)
 
-    def _drain_ytdlp_stderr(self) -> None:
-        assert self._ytdlp is not None
-        stderr: IO[bytes] | None = self._ytdlp.stderr
-        if stderr is None:
-            return
-        for raw in stderr:
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            if line:
-                self._note_stderr("yt-dlp: ", line)
-
     def read(self) -> bytes:
         self._ensure_started()
         assert self.proc is not None
@@ -320,17 +213,15 @@ class MPVPCMSource(discord.AudioSource):
             if not chunk:
                 if data:
                     return data + b"\x00" * (FRAME_SIZE - len(data))
-                ytdlp_code = self._ytdlp.poll() if self._ytdlp else None
                 mpv_code = self.proc.poll()
-                bad_ytdlp = ytdlp_code not in (0, None, -signal.SIGTERM, -signal.SIGKILL, -signal.SIGPIPE)
                 bad_mpv = mpv_code not in (0, None, -signal.SIGTERM, -signal.SIGKILL)
-                if bad_ytdlp or bad_mpv:
+                if bad_mpv:
                     self.failed = True
                     tail = "\n".join(self._stderr_tail[-10:])
-                    self.fail_reason = f"pipe exit yt-dlp={ytdlp_code} mpv={mpv_code}"
+                    self.fail_reason = f"mpv exit={mpv_code}"
                     if tail:
                         self.fail_reason += f"\n{tail}"
-                        log.warning("stream pipe stderr:\n%s", tail)
+                        log.warning("mpv stderr:\n%s", tail)
                     raise RuntimeError(self.fail_reason)
                 return b""
             data += chunk
@@ -360,16 +251,7 @@ class MPVPCMSource(discord.AudioSource):
 
     def cleanup(self) -> None:
         mpv = self.proc
-        ytdlp = self._ytdlp
         self.proc = None
-        self._ytdlp = None
-        # Stop mpv first so yt-dlp gets SIGPIPE / closes cleanly.
         self._stop_proc(mpv)
-        self._stop_proc(ytdlp)
         if mpv is not None:
             log.debug("mpv zakończony (kod %s)", mpv.returncode)
-        if ytdlp is not None and ytdlp.returncode not in (0, None, -signal.SIGTERM, -signal.SIGKILL, -signal.SIGPIPE):
-            self.failed = True
-            tail = "\n".join(self._stderr_tail[-10:])
-            if tail:
-                log.warning("yt-dlp/mpv stderr:\n%s", tail)

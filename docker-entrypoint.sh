@@ -112,7 +112,7 @@ if [ -n "${COOKIES_FROM_BROWSER:-}" ]; then
 elif [ -n "${COOKIES_FILE:-}" ] && [ -f "${COOKIES_FILE}" ]; then
   echo "Używam COOKIES_FILE=${COOKIES_FILE} (opcjonalny fallback)."
 else
-  echo "Cookies wyłączone — odtwarzanie jak Wagner (mpv+ytdl / anon yt-dlp)."
+  echo "Cookies wyłączone (domyślnie) — pot-provider + anon clients."
 fi
 
 exec python -m bot

@@ -8,9 +8,10 @@ from bot.config import settings
 
 log = logging.getLogger("beethovenly.youtube")
 
-# Prefer anon clients (Wagner-style — no login). Cookies only when session looks real.
+# Prefer anon clients that work with bgutil pot-provider / HLS.
+# android_vr often needs GVS PO now; web_safari HLS frequently does not.
 _PLAYER_CLIENTS_WITH_COOKIES = ["mweb", "tv", "web_safari", "web"]
-_PLAYER_CLIENTS_ANON = ["android_vr", "tv", "web_safari"]
+_PLAYER_CLIENTS_ANON = ["web_safari", "android_vr", "mweb", "tv"]
 
 DEFAULT_POT_URL = "http://127.0.0.1:4416"
 
@@ -20,14 +21,16 @@ def has_youtube_cookies() -> bool:
 
 
 def cookies_look_usable() -> bool:
-    """True only when a cookies file exists and looks like a logged-in YouTube session.
+    """True only when cookies are explicitly enabled and look like a real session.
 
-    Invalid/empty cookie dumps make yt-dlp *worse* than anonymous clients, so we
-    treat cookies as opt-in enhancement — same idea as WagnerBot (no cookies).
+    Bad/rotated dumps make yt-dlp return *Sign in to confirm you're not a bot*.
+    Default is off — set ``YOUTUBE_USE_COOKIES=1`` plus a good ``COOKIES_FILE``.
+    pot-provider (``YOUTUBE_POT_BASE_URL``) is the normal path for server IPs.
     """
+    if os.getenv("YOUTUBE_USE_COOKIES", "").strip() not in ("1", "true", "yes", "on"):
+        return False
     path = settings.cookies_file
     if not path or not os.path.isfile(path):
-        # Live browser dump is optional and often rotates; only use when explicitly alone.
         return bool(settings.cookies_from_browser and not settings.cookies_file)
     try:
         raw = open(path, encoding="utf-8", errors="replace").read().lower()
@@ -141,10 +144,10 @@ def log_youtube_runtime_status() -> None:
         )
 
     if cookies_look_usable():
-        log.info("YouTube cookies: usable (optional enhancement enabled)")
-    elif settings.cookies_file and os.path.isfile(settings.cookies_file):
+        log.info("YouTube cookies: ENABLED (YOUTUBE_USE_COOKIES=1)")
+    elif settings.cookies_file:
         log.info(
-            "YouTube cookies file present but session incomplete — ignoring (anon / mpv+ytdl first)"
+            "YouTube cookies file present but unused — set YOUTUBE_USE_COOKIES=1 only after a valid robots.txt export"
         )
     else:
-        log.info("YouTube cookies: off — playing via mpv+ytdl / anon clients (Wagner-style)")
+        log.info("YouTube cookies: off — using pot-provider / anon clients")
